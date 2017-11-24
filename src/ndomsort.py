@@ -9,10 +9,9 @@ A Provably Asymptotically Fast Version of the Generalized Jensen Algorithm for N
 
 """
 
-import functools
-import itertools
-import stools as st
 from typing import List, Iterable, TypeVar, Tuple, Sequence, Callable, Dict
+
+import stools as st
 
 __all__ = ["non_domin_sort"]
 
@@ -43,10 +42,10 @@ def _is_seq_has_one_uniq_value(iterable : Iterable[T]) -> bool:
         is_has_uniq_value = True
 
         while True:
-             value = next(iterator)
-             if value != first_value:
-                 is_has_uniq_value = False
-                 raise StopIteration
+            value = next(iterator)
+            if value != first_value:
+                is_has_uniq_value = False
+                raise StopIteration
     except StopIteration:
         pass
 
@@ -95,13 +94,13 @@ def _sweep_a(seq_fitness_front : dict, indices : List[int]) -> None:
          None
 
     """
-    init_ind = set(indices[0],)
+    init_ind = set((indices[0],))
 
     for i  in indices[1:]:
-        u_ind = [index for  index in init_ind if  seq_fitness_front[index][1] <= seq_fitness_front[i][1]]
-        if len(u_ind) != 0:
-            max_front = max(u_ind, key = lambda index : seq_fitness_front[index]["front"])
-            seq_fitness_front[i]["front"] = max(fitness_front[i]["front"], max_front + 1)
+        u_ind = [index for index in init_ind if seq_fitness_front[index]["fitness"][1] <= seq_fitness_front[i]["fitness"][1]]
+        if u_ind:
+            max_front = max(seq_fitness_front[index]["front"] for index in u_ind)
+            seq_fitness_front[i]["front"] = max(seq_fitness_front[i]["front"], max_front + 1)
 
         init_ind -= { index for index in init_ind if seq_fitness_front[index]["front"] == seq_fitness_front[i]["front"] }
         init_ind.add(i)
@@ -126,6 +125,7 @@ def _sweep_b(seq_fitness_front : dict, comp_indices : List[int], assign_indices 
 
     init_ind = set()
     p = 0
+
     for j in assign_indices:
         if p < len(comp_indices):
             fitness_right = seq_fitness_front[j]["fitness"][:2]
@@ -135,7 +135,7 @@ def _sweep_b(seq_fitness_front : dict, comp_indices : List[int], assign_indices 
             fitness_left = seq_fitness_front[i]["fitness"][:2]
             if fitness_left <= fitness_right:
                 r = { index for index in init_ind if seq_fitness_front[index]["front"] == seq_fitness_front[i]["front"]
-                   and seq_fitness_front[index]["fitness"][1] <  seq_fitness_front[i]["fitness"][1] }
+                      and seq_fitness_front[index]["fitness"][1] < seq_fitness_front[i]["fitness"][1] }
 
                 if not r:
                     init_ind -= { index for index in init_ind if seq_fitness_front[index]["front"] == seq_fitness_front[i]["front"] }
@@ -145,7 +145,7 @@ def _sweep_b(seq_fitness_front : dict, comp_indices : List[int], assign_indices 
                 break
         u = {index for index in init_ind if seq_fitness_front[index]["fitness"][1] <= seq_fitness_front[j]["fitness"][1] }
 
-        if len(u) != 0:
+        if u:
             max_front = max((seq_fitness_front[index]["front"] for index in u))
             seq_fitness_front[j]["front"] = max(seq_fitness_front[j]["front"], max_front + 1)
 
@@ -165,6 +165,7 @@ def _nd_helper_a(seq_fitness_front : dict, indices : List[int] , count_of_obj : 
          None
 
     """
+
     if len(indices) < 2:
         return
     elif len(indices) == 2:
@@ -175,7 +176,7 @@ def _nd_helper_a(seq_fitness_front : dict, indices : List[int] , count_of_obj : 
             seq_fitness_front[index_r]["front"] = max(seq_fitness_front[index_r]["front"], seq_fitness_front[index_l]["front"] + 1)
     elif count_of_obj == 2:
         _sweep_a(seq_fitness_front, indices)
-    elif _is_seq_has_one_uniq_value(fit_fr["fitness"][count_of_obj - 1]  for fit_fr in seq_fitness_front):
+    elif _is_seq_has_one_uniq_value(seq_fitness_front[index]["fitness"][count_of_obj - 1]  for index in indices):
         _nd_helper_a(seq_fitness_front, indices, count_of_obj - 1)
     else:
         median = st.find_low_median((seq_fitness_front[index]["fitness"][count_of_obj - 1] for index in indices))
@@ -188,7 +189,7 @@ def _nd_helper_a(seq_fitness_front : dict, indices : List[int] , count_of_obj : 
         _nd_helper_b(seq_fitness_front, less_median + equal_median, greater_median, count_of_obj - 1)
         _nd_helper_a(seq_fitness_front, greater_median, count_of_obj)
 
-def _nd_helper_b(seq_fitness_front : dict,  comp_indices : List[int], assign_indices : List[int], count_of_obj : int) -> None:
+def _nd_helper_b(seq_fitness_front : dict, comp_indices : List[int], assign_indices : List[int], count_of_obj : int) -> None:
     """Recursive procedure.
 
     It attributes a front index to fitnesses in the 'seq_fitness_front', with the indices in the  'assign_indices', for the first 
@@ -206,6 +207,7 @@ def _nd_helper_b(seq_fitness_front : dict,  comp_indices : List[int], assign_ind
          None
 
     """
+
     if not comp_indices or not assign_indices:
         return
     elif len(comp_indices) == 1 or len(assign_indices) == 1:
@@ -261,7 +263,7 @@ def non_domin_sort(points : Iterable[T], get_fitness : Callable[[T], Iterable[Fi
         fitnesses = [tuple(get_fitness(point)) for point in points]
 
 
-    assert len(fitnesses) > 0, "The length of points must be > 0."
+    assert fitnesses, "The length of points must be > 0."
 
     count_of_obj = len(fitnesses[0])
 
@@ -280,7 +282,7 @@ def non_domin_sort(points : Iterable[T], get_fitness : Callable[[T], Iterable[Fi
 
     # The list 'unique_fitnesses' never changes, but its elements yes.
     # It sorted in the lexicographical order.
-    unique_fitnesses = [{"fitness" : fitness, "front" : 0} for (index, fitness) in enumerate(sorted(fitness_dict.keys()))]
+    unique_fitnesses = [{"fitness" : fitness, "front" : 0}  for fitness in sorted(fitness_dict.keys())]
 
  
     # Further, algorithm works only with the indices of list 'unique_fitnesses'.
@@ -292,11 +294,11 @@ def non_domin_sort(points : Iterable[T], get_fitness : Callable[[T], Iterable[Fi
 
     # Generate fronts.
     for ff in unique_fitnesses:
-        elemnts = tuple((points[index] for index in fitness_dict[ff["fitness"]]))
+        elemnts = tuple(points[index] for index in fitness_dict[ff["fitness"]])
 
         if ff["front"] not in fronts:
             fronts[ff["front"]] = elemnts
         else:
             fronts[ff["front"]] += elemnts
-        
+
     return fronts
