@@ -1,6 +1,6 @@
 """Module is implementation of none-dominated sorting.
 
-Original algorithm described in paper:
+Original algorithm described in the paper:
 
 Buzdalov M., Shalyto A.
 A Provably Asymptotically Fast Version of the Generalized Jensen Algorithm for Non-dominated Sorting 
@@ -9,17 +9,14 @@ A Provably Asymptotically Fast Version of the Generalized Jensen Algorithm for N
 
 """
 
-from typing import List, Iterable, TypeVar, Tuple, Sequence, Callable, Dict
+from typing import List, Iterable, Tuple, Sequence, Callable, Dict, Any
 
 import stools as st
 
 __all__ = ["non_domin_sort"]
 
-T = TypeVar('T')
-Fitness = TypeVar('Fitness')
 
-
-def _is_seq_has_one_uniq_value(iterable : Iterable[T]) -> bool:
+def _is_seq_has_one_uniq_value(iterable : Iterable[Any]) -> bool:
     """Check. Has 'iterable' only a one unique value?
 
     It is equivalent following: 'len({item for item in iterable}) == 1'.
@@ -51,7 +48,7 @@ def _is_seq_has_one_uniq_value(iterable : Iterable[T]) -> bool:
 
     return is_has_uniq_value
  
-def _split_by(seq_fitness_front : dict, indices : List[int], split_value : T, count_of_obj : int) -> Tuple[List[int], List[int], List[int]]:
+def _split_by(seq_fitness_front : dict, indices : List[int], split_value : Any, count_of_obj : int) -> Tuple[List[int], List[int], List[int]]:
     """'indices' splits into three lists.
    
    The three lits: the list of indices, where 'count_of_obj - 1'th value of fitness is less than a 'split_value', the list of indices,
@@ -241,7 +238,7 @@ def _nd_helper_b(seq_fitness_front : dict, comp_indices : List[int], assign_indi
             _nd_helper_b(seq_fitness_front, less_median_indices_1 + equal_median_indices_1, equal_median_indices_2, count_of_obj - 1)
             _nd_helper_b(seq_fitness_front, equal_median_indices_1, equal_median_indices_2, count_of_obj)
 
-def non_domin_sort(points : Iterable[T], get_fitness : Callable[[T], Iterable[Fitness]] = None ) -> Dict[int, Tuple[T]]:
+def non_domin_sort(points : Sequence[Any], get_fitness : Callable[[Any], Iterable[Any]] = None ) -> Dict[int, Tuple[Any]]:
     """A non-dominated sorting of 'points'.
     
     If 'get_fitness' is 'None', then it is identity map. 'get_fitness = lambda x : x'.
@@ -294,11 +291,11 @@ def non_domin_sort(points : Iterable[T], get_fitness : Callable[[T], Iterable[Fi
 
     # Generate fronts.
     for ff in unique_fitnesses:
-        elemnts = tuple(points[index] for index in fitness_dict[ff["fitness"]])
+        elements = tuple(points[index] for index in fitness_dict[ff["fitness"]])
 
         if ff["front"] not in fronts:
-            fronts[ff["front"]] = elemnts
+            fronts[ff["front"]] = elements
         else:
-            fronts[ff["front"]] += elemnts
+            fronts[ff["front"]] += elements
 
     return fronts
