@@ -10,6 +10,7 @@ A Provably Asymptotically Fast Version of the Generalized Jensen Algorithm for N
 """
 
 from typing import List, Iterable, Tuple, Sequence, Callable, Dict, Any
+import itertools
 
 import stools as st
 
@@ -93,7 +94,8 @@ def _sweep_a(seq_fitness_front : dict, indices : List[int]) -> None:
     """
     init_ind = set((indices[0],))
 
-    for i  in indices[1:]:
+    for k  in range(1, len(indices)):
+        i = indices[k]
         u_ind = [index for index in init_ind if seq_fitness_front[index]["fitness"][1] <= seq_fitness_front[i]["fitness"][1]]
         if u_ind:
             max_front = max(seq_fitness_front[index]["front"] for index in u_ind)
