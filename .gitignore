@@ -99,3 +99,8 @@ ENV/
 
 # mypy
 .mypy_cache/
+
+# Visual Studio
+.vs
+*.pyproj
+*.sln
