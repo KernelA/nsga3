@@ -10,6 +10,7 @@ A Provably Asymptotically Fast Version of the Generalized Jensen Algorithm for N
 """
 
 from typing import List, Iterable, Tuple, Sequence, Callable, Dict, Any
+from collections import defaultdict
 import itertools
 
 import stools as st
@@ -256,48 +257,39 @@ def non_domin_sort(points : Sequence[Any], get_fitness : Callable[[Any], Iterabl
 
     """
 
+    assert points, "The length of points must be > 0."
+
     if get_fitness is None:
-        fitnesses = [tuple(point) for point in points]
+        count_of_obj = len(points[0])  
     else:
-        fitnesses = [tuple(get_fitness(point)) for point in points]
-
-
-    assert fitnesses, "The length of points must be > 0."
-
-    count_of_obj = len(fitnesses[0])
-
+        count_of_obj = len(get_fitness(points[0]))
+        
     assert count_of_obj > 1, "The length of fitness must be > 1."
 
     # The dictionary contains the fitnesses as keys and their indices in the list 'fitnesses'.
-    fitness_dict = {}
+    fitness_dict = defaultdict(list)
 
-    for i in range(len(fitnesses)):
-        if fitnesses[i] in fitness_dict:
-            fitness_dict[fitnesses[i]].append(i)
-        else:
-            fitness_dict[fitnesses[i]] = [i]
+    if get_fitness is None:
+        fitnesses_gen = map(tuple, points)
+    else:
+        fitnesses_gen = map(lambda x: tuple(get_fitness(x)), points)
 
-    del fitnesses
+    for (index, fitness) in enumerate(fitnesses_gen):
+        fitness_dict[fitness].append(index)
 
     # The list 'unique_fitnesses' never changes, but its elements yes.
     # It sorted in the lexicographical order.
     unique_fitnesses = [{"fitness" : fitness, "front" : 0}  for fitness in sorted(fitness_dict.keys())]
 
- 
     # Further, algorithm works only with the indices of list 'unique_fitnesses'.
     indices_uniq_fitnesses = list(range(len(unique_fitnesses)))
     _nd_helper_a(unique_fitnesses, indices_uniq_fitnesses, count_of_obj)
 
     # The dictionary contains indices of the fronts as keys and the tuple of 'points' as values.
-    fronts = {}
+    fronts = defaultdict(tuple)
 
     # Generate fronts.
     for ff in unique_fitnesses:
-        elements = tuple(points[index] for index in fitness_dict[ff["fitness"]])
-
-        if ff["front"] not in fronts:
-            fronts[ff["front"]] = elements
-        else:
-            fronts[ff["front"]] += elements
+        fronts[ff["front"]] += tuple(points[index] for index in fitness_dict[ff["fitness"]])
 
     return fronts
