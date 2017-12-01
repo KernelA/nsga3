@@ -452,7 +452,11 @@ class NSGA3:
 
         return math.sqrt(res)
 
-    def _associate(self, population, len_pop):
+    def _associate_and_niche_counting(self, pop_exclude_last_front, pop_last_front):
+
+        len_pop = len(pop_exclude_last_front) + len(pop_last_front)
+
+        self._niche_counts.fill(0)
 
         closest_ref_points_and_distances = { i : { "distance" : 0, "ref_points" : [] }   for i in range(len_pop) }
 
@@ -460,7 +464,23 @@ class NSGA3:
 
         distances = numpy.zeros((len(self._ref_points),))
 
-        for ind in population:
+        for ind in pop_exclude_last_front:
+   
+            distances[0] = self._compute_distance(self._ref_points[0].fitness_on_hyperplane, ind.normalized_fitness)
+ 
+            for index_ref_point in range(1, len(self._ref_points)):
+                distances[index_ref_point] = self._compute_distance(self._ref_points[index_ref_point].fitness_on_hyperplane, ind.normalized_fitness)
+
+            min_dist = distances.min()
+            closest_ref_points_and_distances[index_pop]["distance"] = min_dist
+            indices_gen = (i for i in range(len(distances)) if distances[i] == min_dist)
+            for i in indices_gen:
+                self._niche_counts[i] += 1
+                closest_ref_points_and_distances[index_pop]["ref_points"].append(self._ref_points[i])
+
+            index_pop += 1
+
+        for ind in pop_last_front:
    
             distances[0] = self._compute_distance(self._ref_points[0].fitness_on_hyperplane, ind.normalized_fitness)
  
@@ -475,23 +495,16 @@ class NSGA3:
 
         return closest_ref_points_and_distances
 
-    def _niche_counting(self, closest_ref_points_and_distances, range_indices):
-
-        self._niche_counts.fill(0)
-
-        for index_ref_p in range(len(self._ref_points)):
-            for index in range_indices:
-                if self._ref_points[index_ref_p] in closest_ref_points_and_distances[index]["ref_points"]:
-                    self._niche_counts[index_ref_p] += 1
-
-    def _niching(self, amount_to_choose, closest_ref_points_and_distances, last_front_pareto):
+    def _niching(self, amount_to_choose, closest_ref_points_and_distances, pop_last_front):
 
         k = 1
-        indices_last_front_paretor = set(range(len(last_front_pareto)))
+        indices_last_pareto_front = set(range(len(pop_last_front)))
 
         add_pop = []
 
         type_info = numpy.iinfo(self._niche_counts.dtype)
+
+        diff_len = len(closest_ref_points_and_distances) - len(pop_last_front) 
 
         while k <= amount_to_choose:
             min_niche_count = self._niche_counts.min()
@@ -500,30 +513,24 @@ class NSGA3:
 
             random_index = random.choice(indices_min)
 
-            indices_pop_closest_to_ref_point = [len(closest_ref_points_and_distances) - len(last_front_pareto) + index for index in indices_last_front_paretor
-                                                 if self._ref_points[random_index] in closest_ref_points_and_distances[len(closest_ref_points_and_distances) - len(last_front_pareto) + index]["ref_points"]]
+            indices_pop_closest_to_ref_point = [diff_len + index for index in indices_last_pareto_front
+                                                 if self._ref_points[random_index] in closest_ref_points_and_distances[diff_len + index]["ref_points"]]
 
             if indices_pop_closest_to_ref_point:
                 index_for_del = 0
                 if self._niche_counts[random_index] == 0:
-                    index_min = indices_pop_closest_to_ref_point[0]
-                    min_dist = closest_ref_points_and_distances[index_min]["distance"]
-                    for index in indices_pop_closest_to_ref_point:
-                        if closest_ref_points_and_distances[index]["distance"] < min_dist:
-                            min_dist = closest_ref_points_and_distances[index]["distance"]
-                            index_min = index
-                    index_for_del = index_min + len(last_front_pareto) - len(closest_ref_points_and_distances)
-                    add_pop.append(last_front_pareto[index_for_del])
-
+                    index_min = min(indices_pop_closest_to_ref_point, key = lambda index: closest_ref_points_and_distances[index]["distance"])
+                    index_for_del = index_min - diff_len 
+                    add_pop.append(pop_last_front[index_for_del])
                 else:
-                    index_for_del = random.choice(indices_pop_closest_to_ref_point) + len(last_front_pareto) - len(closest_ref_points_and_distances)
-                    add_pop.append(last_front_pareto[index_for_del])
+                    index_for_del = random.choice(indices_pop_closest_to_ref_point) - diff_len 
+                    add_pop.append(pop_last_front[index_for_del])
 
                 self._niche_counts[random_index] += 1
-                indices_last_front_paretor.remove(index_for_del)
+                indices_last_pareto_front.remove(index_for_del)
                 k += 1
             else:
-                # Deleted a reference point.
+                # Delete a reference point.
                 self._niche_counts[random_index] = type_info.max
         return add_pop
 
@@ -679,9 +686,7 @@ class NSGA3:
 
                 self._normalize(itertools.chain(pop_exclude_last_front, last_pareto_front), amount_to_choose, amount_obj)
 
-                closest_ref_points_and_distances = self._associate(itertools.chain(pop_exclude_last_front, last_pareto_front), len(last_pareto_front) + len(pop_exclude_last_front))
-
-                self._niche_counting(closest_ref_points_and_distances, range(len(pop_exclude_last_front)))
+                closest_ref_points_and_distances = self._associate_and_niche_counting(pop_exclude_last_front, last_pareto_front)
 
                 pop_to_include = self._niching(amount_to_choose, closest_ref_points_and_distances, last_pareto_front)
 
