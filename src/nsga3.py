@@ -1,11 +1,10 @@
 """The module contains implementation of algorithm NSGA-3.
 
-
-
 """
 import random
 import math
 import itertools
+import sys
 from typing import Tuple, List, Any, TypeVar, Callable, Union, Iterable, Sequence
 
 import numpy
@@ -19,6 +18,8 @@ __all__ = ["NSGA3", "SBXBound", "PolynomialMutationBound"]
 NumpyArray = TypeVar("NumpyArray")
 Number = TypeVar("Number")
 
+_EPS = sys.float_info.epsilon * 100
+_REL_TOL = 1E-14
 
 def _achive_scal_fun(fitness : Sequence[Number], weights  : Sequence[Number]) -> float:
     max_value = fitness[0] / weights[0]
@@ -133,31 +134,29 @@ class _Individual:
     def __init__(self, point : NumpyArray, fitness : NumpyArray) -> None:
         self.point = point
         self.fitness = fitness
-
-    def __setattr__(self, name, value):
-        if name == "fitness":
-           _Individual.__dict__[name].__set__(self, value)
-           _Individual.__dict__["normalized_fitness"].__set__(self, value.copy())
-        else:
-           _Individual.__dict__[name].__set__(self, value)
+        self.normalized_fitness = fitness.copy()
 
     def eval(self, objectives : Tuple[Callable[[Tuple[Number]], Number]]) -> None:
         safe_point  = tuple(self.point)
         for (i, obj) in enumerate(objectives):
             self.fitness[i] = obj(safe_point)
-            self.normalized_fitness[i] = self.fitness[i]
 
     def translate_obj(self, ideal_point : NumpyArray) -> None:
+        numpy.copyto(self.normalized_fitness, self.fitness)
         self.normalized_fitness -= ideal_point
 
     def normalize_obj(self, ideal_point : NumpyArray, intercepts : NumpyArray) -> None:
         for i in range(len(self.normalized_fitness)):
-            if math.isclose(ideal_point[i], intercepts[i], rel_tol = 1E-14):
-               self.normalized_fitness[i] /= 1E-15
+            if math.isclose(ideal_point[i], intercepts[i], rel_tol = _REL_TOL):
+               self.normalized_fitness[i] /= _EPS
             else:
                self.normalized_fitness[i] /= (intercepts[i] - ideal_point[i])
-            if self.normalized_fitness[i] < 0:
-                raise AssertionError("< 0")
+
+            assert self.normalized_fitness[i] >= 0, "normalized_fitness < 0"
+
+    def copy_from_ind(self, ind):
+        numpy.copyto(self.point, ind.point)
+        numpy.copyto(self.fitness, ind.fitness)
 
     def __str__(self) -> str:
         return "Point: {0}\nFitness: {1}\nNormalized fitness: {2}".format(self.point, self.fitness, self.normalized_fitness)
@@ -168,23 +167,26 @@ class _RefPoint:
 
     def __init__(self, fitness : NumpyArray):
         self.fitness = fitness
+        self.fitness_on_hyperplane = fitness.copy()
 
-    def __setattr__(self, name, value):
-        _RefPoint.__dict__[name].__set__(self, value)
-        _RefPoint.__dict__["fitness_on_hyperplane"].__set__(self, value.copy())
     
     def map_on_hyperplane(self, ideal_point : NumpyArray, intercepts : NumpyArray) -> None:
         numpy.copyto(self.fitness_on_hyperplane, self.fitness)
+
         self.fitness_on_hyperplane -= ideal_point
+
         for i in range(len(self.fitness_on_hyperplane)):
-            self.fitness_on_hyperplane[i] /= (intercepts[i] - ideal_point[i])
+            if math.isclose(ideal_point[i], intercepts[i], rel_tol = _REL_TOL):
+               self.fitness_on_hyperplane[i] /= _EPS
+            else:
+               self.fitness_on_hyperplane[i] /= (intercepts[i] - ideal_point[i])
 
     def __str__(self) -> str:
         return "Fitness: {0}\nNormalized fitness: {1}".format(self.fitness, self.fitness_on_hyperplane)
 
 class NSGA3:
 
-    _divisions_axis = {
+    __divisions_axis = {
         2 : (4,),
         3 : (10,),
         4 : (8,),
@@ -228,9 +230,9 @@ class NSGA3:
                 del self._population[size_pop:]
 
         for ind in self._population:
-            if ind.point.size != dim_size:
+            if len(ind.point) != dim_size:
                 ind.point = numpy.zeros((dim_size,))
-            if ind.fitness.size != amount_obj:
+            if len(ind.fitness) != amount_obj:
                 ind.fitness = numpy.zeros((amount_obj,))
 
             for (index, (low_b, upp_b)) in zip(range(dim_size), bounds):
@@ -256,13 +258,13 @@ class NSGA3:
             def compute_point_on_hyperplane(coord_base_vector, vec_coeff, amount_obj):
                 point_on_hyperplane = numpy.zeros((amount_obj,))
      
-                for index_array in range(point_on_hyperplane.size):
+                for index_array in range(len(point_on_hyperplane)):
                     point_on_hyperplane[index_array] = coord_base_vector * vec_coeff[index_array]
                 return point_on_hyperplane
       
             for i in range(0, len(divisions)):
                 coord_base_vector = (i + 1) * step
-                vecs_coeffs = st.generate_coeff_convex_hull(amount_obj, 1 / divisions[i])
+                vecs_coeffs = st.generate_coeff_convex_hull(amount_obj, divisions[i] + 1)
       
                 self._ref_points += [_RefPoint(compute_point_on_hyperplane(coord_base_vector, vec_coeff, amount_obj)) 
                                       for vec_coeff in vecs_coeffs]
@@ -324,13 +326,15 @@ class NSGA3:
 
         amount_ref_points = len(self._ref_points)
 
-        if not self._is_size_pop_str: # 'size_pop' is 'int'.
-            return size_pop
-        else:
+        new_size_pop = size_pop
+
+        if self._is_size_pop_str:
             new_size_pop = amount_ref_points
             while (new_size_pop + 1) % 4 != 0:
                 new_size_pop += 1
-            return new_size_pop + 1
+            new_size_pop += 1
+
+        return new_size_pop
 
     def _find_ideal_point(self, population):
 
@@ -415,9 +419,8 @@ class NSGA3:
 
             solution = linalg.solve(a, b, overwrite_b = True)
          
-
             for i in range(len(solution)):
-                assert abs(solution[i]) < 1E-13, "Solution is zero."
+                assert abs(solution[i]) < _EPS * 100, "Solution is zero."
                 solution[i] = 1 / solution[i]
 
         # Find the maximum values for the all coordinates of fitness in the population.
@@ -428,7 +431,7 @@ class NSGA3:
                 numpy.copyto(solution, first_ind.fitness)
                 while True:
                     ind = next(iterator)
-                    for i in range(len(ind.fitness)):
+                    for i in range(len(solution)):
                         if solution[i] < ind.fitness[i]:
                             solution[i] = ind.fitness[i]
             except StopIteration:
@@ -445,7 +448,7 @@ class NSGA3:
         res = 0
 
         for i in range(len(direction)):
-            res += (point[i] - direction[i] * coeff) * (point[i] - direction[i] * coeff)
+            res += (point[i] - direction[i] * coeff) ** 2
 
         return math.sqrt(res)
 
@@ -532,7 +535,7 @@ class NSGA3:
         upper_bounds = params["upper_bounds"]
    
         j = 0
-        for i in range(len(parents) // 2):
+        for i in range(len(parents)):
             index_parent1 = random.randint(0, len(parents) - 1)
             index_parent2 = random.randint(0, len(parents) - 1)
 
@@ -633,6 +636,7 @@ class NSGA3:
         for num_iter in range(num_pop):
 
             params["iter"] = num_iter
+
             if num_iter % 10 == 0:
                 print("Iteration: ", num_iter)
 
@@ -658,7 +662,7 @@ class NSGA3:
                 index_pop = 0
                 for i in range(last_index_pareto_front + 1):
                     for ind in fronts[i]:
-                        numpy.copyto(self._population[index_pop].point, ind.point)
+                        self._population[index_pop].copy_from_ind(ind)
                         index_pop += 1
             else:             
                 pop_exclude_last_front = tuple()
@@ -670,7 +674,7 @@ class NSGA3:
 
                 amount_to_choose = len(self._population) - len(pop_exclude_last_front)
 
-                # Ideal point must be in the first pareto front.
+                # Ideal point must be in the first Pareto front.
                 self._find_ideal_point(fronts[0])
 
                 self._normalize(itertools.chain(pop_exclude_last_front, last_pareto_front), amount_to_choose, amount_obj)
@@ -682,6 +686,6 @@ class NSGA3:
                 pop_to_include = self._niching(amount_to_choose, closest_ref_points_and_distances, last_pareto_front)
 
                 for (i, ind) in enumerate(itertools.chain(pop_exclude_last_front, pop_to_include)):
-                   numpy.copyto(self._population[i].point, ind.point)
+                    self._population[i].copy_from_ind(ind)
 
         return tuple((tuple(ind.point), tuple(ind.fitness)) for ind in self._population)        
