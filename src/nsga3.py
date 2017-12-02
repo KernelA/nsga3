@@ -152,8 +152,6 @@ class _Individual:
             else:
                self.normalized_fitness[i] /= (intercepts[i] - ideal_point[i])
 
-            assert self.normalized_fitness[i] >= 0, "normalized_fitness < 0"
-
     def copy_from_ind(self, ind):
         numpy.copyto(self.point, ind.point)
         numpy.copyto(self.fitness, ind.fitness)
@@ -420,7 +418,6 @@ class NSGA3:
             solution = linalg.solve(a, b, overwrite_b = True)
          
             for i in range(len(solution)):
-                assert abs(solution[i]) < _EPS * 100, "Solution is zero."
                 solution[i] = 1 / solution[i]
 
         # Find the maximum values for the all coordinates of fitness in the population.
@@ -654,10 +651,6 @@ class NSGA3:
             ndomsort_size_pop = 0
 
             last_index_pareto_front = 0
-
-            #deb
-            a = set(id(i) for i in fronts.values())
-            assert a != len(self._population), "N dom sort error"
 
             while ndomsort_size_pop <= new_size_pop:
                 ndomsort_size_pop += len(fronts[last_index_pareto_front])
