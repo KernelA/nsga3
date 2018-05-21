@@ -18,8 +18,8 @@ class SBXBound(CrossoverOp):
     def __init__(self, crossover_prob: float, distr_index: float):
         assert crossover_prob >= 0 and crossover_prob <= 1, "'crossover_prob' must be in [0;1]."
         assert distr_index >= 0, "'distr_index' must be >= 0"
-        self.distr_index = distr_index
-        self.cross_prob = crossover_prob
+        self._distr_index = distr_index
+        self._cross_prob = crossover_prob
 
     def cross(self, parents: Sequence[np.ndarray], **kwargs) -> List[np.ndarray]:
         lower_bounds = kwargs["lower_bounds"]

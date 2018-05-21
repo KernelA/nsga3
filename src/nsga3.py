@@ -5,279 +5,202 @@ import random
 import math
 import itertools
 import sys
-from typing import Tuple, List, Any, TypeVar, Callable, Union, Iterable, Sequence
+from typing import Tuple, Any, Callable, Union, Iterable, Sequence, Type
 
-import numpy
+
+import numpy as np
 import scipy
 from scipy import linalg
-import ndomsort
-import stools as st
+from nds import ndomsort
 
-__all__ = ["NSGA3", "SBXBound", "PolynomialMutationBound"]
+import convhull
+import bproblem
 
-NumpyArray = TypeVar("NumpyArray")
-Number = TypeVar("Number")
+__all__ = ["NSGA3"]
+
 
 _EPS = sys.float_info.epsilon * 100
-_REL_TOL = 1E-14
-
-def _achive_scal_fun(fitness : Sequence[Number], weights  : Sequence[Number]) -> float:
-    max_value = fitness[0] / weights[0]
-    for (value, weight) in zip(fitness, weights):
-        max_value = max(max_value, value / weight)
-    return max_value
+_REL_TOL = sys.float_info.dig - 2 if sys.float_info.dig - 2 > 0 else sys.float_info.dig
 
 
-class SBXBound:
-    def __init__(self, distr_index : float):
-        self._distr_index = distr_index
+def clip_random(number: float, low_b: float, upp_b: float) -> float:
+    """A random clipping.
 
-    def cross(self, parent1 : Tuple[Number], parent2 : Tuple[Number], **kwargs) -> Tuple[Number]:
+    --------------------
+    Args:
+         'number': The number for the clipping.
+         'low_b': The lower bound.
+         'upp_b': The upper bound.
 
-        child1 = numpy.array(parent1, dtype = float)
-        child2 = numpy.array(parent2, dtype = float)
+    --------------------
+    Returns:
+         'random.uniform(low_b, upp_b)' if  'number' < 'low_b' or 'number' > 'upp_b', otherwise 'number'.
+    """
+    assert low_b <= upp_b, "The lower bound must be less or equal then the upper bound."
 
-        lower_bounds = kwargs["lower_bounds"]
-        upper_bounds = kwargs["upper_bounds"]
-
-        for i in range(len(parent1)):
-
-            if math.isclose(parent1[i], parent2[i]):
-                continue
-
-            sum_par = parent1[i] + parent2[i]
-            abs_diff = abs(parent2[i] - parent1[i])
-
-            limit_int_low = (sum_par - 2 * lower_bounds[i]) / abs_diff
-            limit_int_upp = (2 * upper_bounds[i] - sum_par) / abs_diff
-
-            uniform_var = random.uniform(0,1)
-            
-            if limit_int_low <= 1:
-                probability_lower = 0.5 * math.pow(limit_int_low, self._distr_index + 1)
-            else:
-                probability_lower = 0.5 * (2 - 1 / math.pow(limit_int_low, self._distr_index + 1))
-
-            if limit_int_upp <= 1:
-                probability_upper = 0.5 * math.pow(limit_int_upp, self._distr_index + 1)
-            else:
-                probability_upper = 0.5 * (2 - 1 / math.pow(limit_int_upp, self._distr_index + 1))
-             
-
-            probability_factor1 = uniform_var * probability_lower
-            probability_factor2 = uniform_var * probability_upper
+    return random.uniform(low_b, upp_b) if number < low_b or number > upp_b else number
 
 
-            if  probability_factor1 <= 0.5:
-                factor_upper = math.pow(2 * probability_factor1, 1.0 / self._distr_index)
-            else:
-                factor_upper = math.pow(0.5 * 1 /  (1 - probability_factor1), self._distr_index + 1)
-
-            if probability_factor2 <= 0.5:
-                factor_lower = math.pow(2 * probability_factor2, 1.0 / self._distr_index)
-            else:
-                factor_lower = math.pow(0.5 * 1 /  (1 - probability_factor2), self._distr_index + 1)
-
-            child1[i] = 0.5 * (sum_par - factor_lower * abs_diff)
-            child2[i] = 0.5 * (sum_par + factor_upper * abs_diff)
-
-            child1[i] = min(max(child1[i], lower_bounds[i]), upper_bounds[i])
-            child2[i] = min(max(child2[i], lower_bounds[i]), upper_bounds[i])
-
-        return child1, child2
-
-class PolynomialMutationBound:
-
-    # 'exp_mut' type ?
-    def __init__(self, prob_mut : float, exp_mut : float):
-        self._prob_mut = prob_mut
-        self._exp_mut = exp_mut
-
-    def mutate(self, individual : Tuple[Number], **kwargs) -> NumpyArray:
-
-        lower_bounds = kwargs["lower_bounds"]
-        upper_bounds = kwargs["upper_bounds"]
-
-        mut_ind = numpy.array(individual, dtype = float)
-
-        for i in range(len(individual)):
-            if random.uniform(0,1) < self._prob_mut:
-                x = mut_ind[i]
-                delta1 = (x - lower_bounds[i]) / (upper_bounds[i] - lower_bounds[i])
-                delta2 = (upper_bounds[i] - x) / (upper_bounds[i] - lower_bounds[i])
-
-                mut_pow = 1 / (self._exp_mut + 1)
-
-                uniform_var = random.uniform(0,1)
-
-                if uniform_var < 0.5:
-                    var_x = 1 - delta1
-                    val = 2 * uniform_var + (1 - 2 * uniform_var) * math.pow(var_x, (self._exp_mut + 1))
-                    delta_q = math.pow(val, mut_pow) - 1
-                else:
-                    var_x = 1 - delta2
-                    val = 2 * (1 - uniform_var) + 2 * (uniform_var - 0.5) * math.pow(var_x, (self._exp_mut + 1))
-                    delta_q = 1 - math.pow(val, mut_pow)
- 
-
-                x += delta_q * (upper_bounds[i] - lower_bounds[i])
-                x = min(max(x, lower_bounds[i]), upper_bounds[i])
-                mut_ind[i] = x
-
-        return mut_ind
+def _ASF(fitness: np.ndarray, weights: np.ndarray) -> float:
+    return (fitness / weights).max()
 
 
 class _Individual:
 
     __slots__ = ["point", "fitness", "normalized_fitness"]
 
-    def __init__(self, point : NumpyArray, fitness : NumpyArray) -> None:
+    def __init__(self, point: np.ndarray, fitness: np.ndarray) -> None:
         self.point = point
         self.fitness = fitness
         self.normalized_fitness = fitness.copy()
 
-    def eval(self, objectives : Tuple[Callable[[Tuple[Number]], Number]]) -> None:
-        safe_point  = tuple(self.point)
+    def eval(self, objectives: Tuple[Callable[[np.ndarray], float]]) -> None:
         for (i, obj) in enumerate(objectives):
-            self.fitness[i] = obj(safe_point)
+            self.fitness[i] = obj(self.point)
 
-    def translate_obj(self, ideal_point : NumpyArray) -> None:
-        numpy.copyto(self.normalized_fitness, self.fitness)
+    def translate_obj(self, ideal_point: np.ndarray) -> None:
+        np.copyto(self.normalized_fitness, self.fitness)
         self.normalized_fitness -= ideal_point
 
-    def normalize_obj(self, ideal_point : NumpyArray, intercepts : NumpyArray) -> None:
+    def normalize_obj(self, ideal_point: np.ndarray, intercepts: np.ndarray) -> None:
         for i in range(len(self.normalized_fitness)):
-            if math.isclose(ideal_point[i], intercepts[i], rel_tol = _REL_TOL):
-               self.normalized_fitness[i] /= _EPS
+            if math.isclose(ideal_point[i], intercepts[i], rel_tol=_REL_TOL):
+                self.normalized_fitness[i] /= _EPS
             else:
-               self.normalized_fitness[i] /= (intercepts[i] - ideal_point[i])
+                self.normalized_fitness[i] /= (intercepts[i] - ideal_point[i])
 
     def copy_from_ind(self, ind):
-        numpy.copyto(self.point, ind.point)
-        numpy.copyto(self.fitness, ind.fitness)
+        np.copyto(self.point, ind.point)
+        np.copyto(self.fitness, ind.fitness)
 
     def __str__(self) -> str:
         return "Point: {0}\nFitness: {1}\nNormalized fitness: {2}".format(self.point, self.fitness, self.normalized_fitness)
+
 
 class _RefPoint:
 
     __slots__ = ["fitness", "fitness_on_hyperplane"]
 
-    def __init__(self, fitness : NumpyArray):
+    def __init__(self, fitness: np.ndarray):
         self.fitness = fitness
         self.fitness_on_hyperplane = fitness.copy()
 
-    
-    def map_on_hyperplane(self, ideal_point : NumpyArray, intercepts : NumpyArray) -> None:
-        numpy.copyto(self.fitness_on_hyperplane, self.fitness)
+    def map_on_hyperplane(self, ideal_point: np.ndarray, intercepts: np.ndarray) -> None:
+        np.copyto(self.fitness_on_hyperplane, self.fitness)
 
         self.fitness_on_hyperplane -= ideal_point
 
-        for i in range(len(self.fitness_on_hyperplane)):
-            if math.isclose(ideal_point[i], intercepts[i], rel_tol = _REL_TOL):
-               self.fitness_on_hyperplane[i] /= _EPS
-            else:
-               self.fitness_on_hyperplane[i] /= (intercepts[i] - ideal_point[i])
+        indices_with_close_values = np.isclose(ideal_point, intercepts, rtol=_REL_TOL, atol=_EPS)
+        diff = (intercepts - ideal_point)[~indices_with_close_values]
+
+        self.fitness_on_hyperplane[:, indices_with_close_values] /= _EPS
+        self.fitness_on_hyperplane[:, ~indices_with_close_values] /= diff
 
     def __str__(self) -> str:
         return "Fitness: {0}\nNormalized fitness: {1}".format(self.fitness, self.fitness_on_hyperplane)
 
+
 class NSGA3:
 
     __divisions_axis = {
-        2 : (4,),
-        3 : (10,),
-        4 : (8,),
-        5 : (6,),
-        6 : (5,),
-        7 : (4,),
-        8 : (2, 3),
-        9 : (2, 3),
-        10 : (2, 3),
-        11 : (1, 2)
+        2: (4,),
+        3: (10,),
+        4: (8,),
+        5: (6,),
+        6: (5,),
+        7: (4,),
+        8: (2, 3),
+        9: (2, 3),
+        10: (2, 3),
+        11: (1, 2)
     }
 
-    def __init__(self, oper_cross, oper_mut):
+    def __init__(self, crossover_op, mutation_operator):
         self._ref_points = []
-        self._prev_params = {}
-        self._population = []
+        self.__points = None
+        self.__fitnesses = None
+        self.__normalized_fitnesses = None
+        self.__children_points = None
+        self.__children_fitness = None
+        self.__children_normalized_fitness = None
+        self.__points_copy = None
+        self.__fitnesses_copy = None
+        self.__prev_params = {}
 
         self._ideal_point = None
         self._niche_counts = None
 
-        self._crossover = oper_cross
-        self._mut = oper_mut
+        self._crossover_op = crossover_op
+        self._mut_op = mutation_operator
 
         self._is_ref_points_int = False
         self._is_ref_points_str = False
 
         self._is_size_pop_str = False
         
-    def _generate_init_pop(self, size_pop, bounds, amount_obj):
-
-        dim_size = len(bounds)
-
-        if 'size_pop' not in self._prev_params:
-            self._population = [_Individual(numpy.zeros((dim_size,)), numpy.zeros((amount_obj,))) for i in range(size_pop)]
+    def _generate_init_pop(self, size_pop: int, dim_decision: int, amount_obj: int):
+        if self.__points is None:
+            self.__points = np.zeros((size_pop, dim_decision))
         else:
-            old_size_pop = self._prev_params['size_pop']
-            if  old_size_pop < size_pop:
-                size_add = size_pop - old_size_pop
-                self._population.extend([_Individual(numpy.zeros((dim_size,)), numpy.zeros((amount_obj,))) for i in range(size_add)])
-            elif old_size_pop > size_pop:
-                del self._population[size_pop:]
+            self.__points.resize((size_pop, dim_decision))
 
-        for ind in self._population:
-            if len(ind.point) != dim_size:
-                ind.point = numpy.zeros((dim_size,))
-            if len(ind.fitness) != amount_obj:
-                ind.fitness = numpy.zeros((amount_obj,))
+        if self.__fitnesses is None:
+            self.__fitnesses = np.zeros((size_pop, amount_obj))
+        else:
+            self.__fitnesses.resize((size_pop, amount_obj))
 
-            for (index, (low_b, upp_b)) in zip(range(dim_size), bounds):
-                ind.point[index] = random.uniform(low_b, upp_b)
+        self.__points_copy = self.__points.copy()
+        self.__fitnesses_copy = self.__fitnesses.copy()
 
-        self._prev_params['size_pop'] = size_pop
+        if self.__normalized_fitnesses is None:
+            self.__normalized_fitnesses = np.zeros((size_pop, amount_obj))
+        else:
+            self.__normalized_fitnesses.resize((size_pop, amount_obj))
+
+        self.__prev_params["size_pop"] = size_pop
 
     def _generate_reference_points(self, divisions, amount_obj, supplied_asp_points):
-
         is_gen_ref_point = True
 
         if divisions is None:
-            self._ref_points = [_RefPoint(numpy.array(sal, dtype = float)) for sal in supplied_asp_points]
+            self._ref_points = [_RefPoint(np.array(sap, dtype=float)) for sap in supplied_asp_points]
             is_gen_ref_point = False
-        elif 'divisions' in self._prev_params:
-            if self._prev_params['divisions'] is not None:
-                if self._prev_params['divisions'] == divisions:
+        elif 'divisions' in self.__prev_params:
+            if self.__prev_params['divisions'] is not None:
+                if self.__prev_params['divisions'] == divisions:
                     is_gen_ref_point = False
 
         if is_gen_ref_point:  
             step = 1 / len(divisions)
      
             def compute_point_on_hyperplane(coord_base_vector, vec_coeff, amount_obj):
-                point_on_hyperplane = numpy.zeros((amount_obj,))
+                point_on_hyperplane = np.zeros(amount_obj)
      
                 for index_array in range(len(point_on_hyperplane)):
                     point_on_hyperplane[index_array] = coord_base_vector * vec_coeff[index_array]
                 return point_on_hyperplane
       
-            for i in range(0, len(divisions)):
+            for i in range(len(divisions)):
                 coord_base_vector = (i + 1) * step
-                vecs_coeffs = st.generate_coeff_convex_hull(amount_obj, divisions[i] + 1)
+                vecs_coeffs = convhull.generate_coeff_convex_hull(amount_obj, divisions[i] + 1)
       
                 self._ref_points += [_RefPoint(compute_point_on_hyperplane(coord_base_vector, vec_coeff, amount_obj)) 
                                       for vec_coeff in vecs_coeffs]
 
-        self._prev_params['divisions'] = divisions
+        self.__prev_params['divisions'] = divisions
 
-    def _check_params(self, num_pop, objectives, bounds, size_pop, ref_points, supplied_asp_points):
+    def _check_params(self, num_pop: int, amount_objs: int, lower_bounds: np.ndarray, upper_bounds: np.ndarray,
+                      size_pop: int, ref_points, supplied_asp_points):
              
-        assert len(objectives) > 1, "The length of 'objectives' must be > 1."
+        assert amount_objs > 1, "The length of 'objectives' must be > 1."
         assert num_pop > 0, "'num_pop' must be > 0."
-        assert bounds, "'len(bounds)' must be > 0."
+        assert len(lower_bounds) > 0 and len(upper_bounds), "The length of 'lower_bounds' or 'upper_bounds' must be > 0."
+        assert len(lower_bounds) == len(upper_bounds), "The 'lower_bounds' and 'upper_bound' have unequal length."
 
-        for (i, (low_b, upp_b)) in zip(range(len(bounds)), bounds):
-            assert low_b < upp_b, "The lower bounds must be less then the upper bounds." \
-                "The lower bound at position {0} is greater or equal than upper bound.".format(i)
+        indices = upper_bounds > lower_bounds
+
+        assert indices.any(), "The lower bounds must be less then the upper bounds." \
+                              "The lower bound at position: {0} is greater or equal than upper bound.".format(indices.nonzero())
 
         if isinstance(size_pop, str):
             if size_pop != 'auto':
@@ -297,17 +220,18 @@ class NSGA3:
         else:
             raise TypeError("'ref_points' must be 'int', 'tuple' or 'str'.")
 
-
         if self._is_ref_points_str:
             if ref_points != 'auto':
                 raise ValueError("The parameter 'ref_points' is not equal 'auto'.")
-        elif self._is_ref_points_int or not (self._is_ref_points_str or self._is_ref_points_int): # or 'ref_points' is tuple.
+        # or 'ref_points' is tuple.
+        elif self._is_ref_points_int or not (self._is_ref_points_str or self._is_ref_points_int):
             if supplied_asp_points is not None:
                 raise ValueError("The parameter 'supplied_asp_points' must be 'None', when 'ref_points' is not 'auto'.")
 
         if self._is_ref_points_int:
             assert ref_points > 0, "'ref_points' must be > 0."
-        elif not (self._is_ref_points_str or self._is_ref_points_int): # 'ref_points' is tuple.
+        # 'ref_points' is tuple.
+        elif not (self._is_ref_points_str or self._is_ref_points_int):
             assert ref_points, "Length 'ref_points' must be > 0."
 
             for (i, ref) in enumerate(ref_points):
@@ -317,11 +241,11 @@ class NSGA3:
             is_empty = True
             for (i, sal) in enumerate(supplied_asp_points):
                 is_empty = False
-                assert len(sal) == len(objectives), "The length of the supplied aspiration point at position {0} is not equals length 'objectives'.".format(i)
+                assert len(sal) == len(amount_objs), "The length of the supplied aspiration point at position {0}" \
+                                                     " is not equals length 'objectives'.".format(i)
             assert not is_empty, "The supplied aspiration points are empty."
  
-    def _find_pop_size(self, size_pop):
-
+    def _find_pop_size(self, size_pop: int):
         amount_ref_points = len(self._ref_points)
 
         new_size_pop = size_pop
@@ -334,51 +258,21 @@ class NSGA3:
 
         return new_size_pop
 
-    def _find_ideal_point(self, population):
+    def _find_ideal_point(self, fitnesses: np.ndarray):
+        fitnesses.min(axis=0, out=self._ideal_point)
 
-        iterator = iter(population)
-
-        try:
-           fisrt_ind = next(iterator)
-           numpy.copyto(self._ideal_point, fisrt_ind.fitness)
-
-           while True:
-               ind = next(iterator)
-               for i in range(len(self._ideal_point)):
-                   if ind.fitness[i] < self._ideal_point[i]:
-                       self._ideal_point[i] = ind.fitness[i]
-        except StopIteration:
-            pass
-
-    def _find_extreme_points(self, population, amount_obj):
-
-        weights = numpy.zeros((amount_obj,))
-
-        extreme_points = [None for i in range(amount_obj)]
+    def _find_extreme_points(self, normalized_fitnesses: np.ndarray, amount_obj: int):
+        weights = np.full(amount_obj, 1E-6)
+        extreme_points = np.zeros((amount_obj, amount_obj))
 
         for num_obj in range(amount_obj):
-            weights.fill(1E-6)
+            weights[num_obj - 1] = 1E-6
             weights[num_obj] = 1
-            
-            iterator = iter(population)
 
-            try:
-                first_ind = next(iterator)
-
-                # Here 'normalized_fitness' is the translated fitness.
-                # The ideal point has not been subtracting from the fitness at the moment.
-                min_asf = _achive_scal_fun(first_ind.normalized_fitness, weights)
-
-                extreme_points[num_obj] = fisrt_ind.normalized_fitness
-
-                while True:
-                    ind = next(iterator)
-                    cur_asf = _achive_scal_fun(ind.normalized_fitness, weights)
-                    if cur_asf < min_asf:
-                        min_asf = cur_asf
-                        extreme_points[num_obj] = ind.normalized_fitness
-            except StopIteration:
-                pass
+            # Here 'normalized_fitness' is the translated fitness.
+            # The ideal point has been subtracting from the fitness at the moment.
+            min_normalized_fitness = min(normalized_fitnesses, key=lambda x: _ASF(x, weights))
+            extreme_points[num_obj] = min_normalized_fitness
       
         return extreme_points
 
@@ -386,10 +280,10 @@ class NSGA3:
         if supplied_asp_points is not None:
             divisions = None
         elif self._is_ref_points_str:
-            if amount_obj in NSGA3._divisions_axis:
-                divisions = NSGA3._divisions_axis[amount_obj]
+            if amount_obj in NSGA3.__divisions_axis:
+                divisions = NSGA3.__divisions_axis[amount_obj]
             else:
-                divisions = NSGA3._divisions_axis[max(NSGA3._divisions_axis.keys())]
+                divisions = NSGA3.__divisions_axis[max(NSGA3.__divisions_axis.keys())]
         elif self._is_ref_points_int:
             divisions = (ref_points,)
         else:
@@ -397,51 +291,31 @@ class NSGA3:
 
         return divisions
        
-    def _find_intercepts(self, population, extreme_points):
+    def _find_intercepts(self, fitnesses: np.ndarray, extreme_points: np.ndarray):
+        unique_rows = np.unique(extreme_points, axis=0)
+        is_seq_has_duplicates = len(unique_rows) != len(extreme_points)
 
-        def _is_seq_numpy_array_has_duplicate(sequence : Sequence[NumpyArray]) -> bool:
-    
-            for i in range(len(sequence)):
-                for j in range(i + 1, len(sequence)):
-                    if numpy.array_equal(sequence[i], sequence[j]):
-                            return True
-            return False
-
-        is_seq_has_duplicate = _is_seq_numpy_array_has_duplicate(extreme_points)
-
-        if is_seq_has_duplicate:
-            solution = numpy.zeros((len(extreme_points,)))
+        if is_seq_has_duplicates:
+            solution = np.zeros(len(extreme_points))
         else:
-            a = numpy.array(extreme_points, dtype = float)
-            b = numpy.ones(len(extreme_points,))
+            b = np.ones(len(extreme_points))
 
-            solution = linalg.solve(a, b, overwrite_b = True)
+            solution = linalg.solve(extreme_points, b, overwrite_a=True, overwrite_b=True)
          
             for i in range(len(solution)):
                 solution[i] = 1 / solution[i]
 
         # Find the maximum values for the all coordinates of fitness in the population.
-        if is_seq_has_duplicate or numpy.any(solution < 0):
-            iterator = iter(population)
-            try:
-                first_ind = next(population)
-                numpy.copyto(solution, first_ind.fitness)
-                while True:
-                    ind = next(iterator)
-                    for i in range(len(solution)):
-                        if solution[i] < ind.fitness[i]:
-                            solution[i] = ind.fitness[i]
-            except StopIteration:
-                pass
-   
+        if is_seq_has_duplicates or np.any(solution < 0):
+            fitnesses.max(axis=0, out=solution)
+
         return solution
 
-    def _compute_distance(self, direction, point):
+    def _compute_distance(self, direction: np.ndarray, point: np.ndarray):
         dot_prod = scipy.dot(direction, point)
         squared_norm = scipy.power(direction, 2).sum()
 
         coeff = dot_prod / squared_norm
-
         res = 0
 
         for i in range(len(direction)):
@@ -449,148 +323,145 @@ class NSGA3:
 
         return math.sqrt(res)
 
-    def _associate_and_niche_counting(self, pop_exclude_last_front, pop_last_front):
+    def _associate_and_niche_counting(self, normalized_fitnesses_exclude_last_front: np.ndarray
+                                      , normalized_fitnesses_last_front: np.ndarray):
 
-        len_pop = len(pop_exclude_last_front) + len(pop_last_front)
+        len_pop = len(normalized_fitnesses_exclude_last_front) + len(normalized_fitnesses_last_front)
 
         self._niche_counts.fill(0)
 
-        closest_ref_points_and_distances = { i : { "distance" : 0, "ref_points" : [] }   for i in range(len_pop) }
+        closest_ref_points_and_distances = {i: {"distance": 0, "ref_points": []} for i in range(len_pop)}
 
         index_pop = 0
 
-        distances = numpy.zeros((len(self._ref_points),))
+        distances = np.zeros(len(self._ref_points))
 
-        for ind in pop_exclude_last_front:
-   
-            distances[0] = self._compute_distance(self._ref_points[0].fitness_on_hyperplane, ind.normalized_fitness)
- 
-            for index_ref_point in range(1, len(self._ref_points)):
-                distances[index_ref_point] = self._compute_distance(self._ref_points[index_ref_point].fitness_on_hyperplane, ind.normalized_fitness)
+        for ind in normalized_fitnesses_exclude_last_front:
+            for (index_rp, ref_point) in enumerate(self._ref_points):
+                distances[index_rp] = self._compute_distance(ref_point.fitness_on_hyperplane, ind)
 
             min_dist = distances.min()
             closest_ref_points_and_distances[index_pop]["distance"] = min_dist
-            indices_gen = (i for i in range(len(distances)) if distances[i] == min_dist)
-            for i in indices_gen:
+            indices = (distances == min_dist).nonzero()[0]
+            for i in indices:
                 self._niche_counts[i] += 1
                 closest_ref_points_and_distances[index_pop]["ref_points"].append(self._ref_points[i])
 
             index_pop += 1
 
-        for ind in pop_last_front:
-   
-            distances[0] = self._compute_distance(self._ref_points[0].fitness_on_hyperplane, ind.normalized_fitness)
- 
-            for index_ref_point in range(1, len(self._ref_points)):
-                distances[index_ref_point] = self._compute_distance(self._ref_points[index_ref_point].fitness_on_hyperplane, ind.normalized_fitness)
+        for ind in normalized_fitnesses_last_front:
+            for (index_rp, ref_point) in enumerate(self._ref_points):
+                distances[index_rp] = self._compute_distance(ref_point.fitness_on_hyperplane, ind)
 
             min_dist = distances.min()
             closest_ref_points_and_distances[index_pop]["distance"] = min_dist
-            closest_ref_points_and_distances[index_pop]["ref_points"].extend(self._ref_points[i] for i in range(len(distances)) if distances[i] == min_dist)
+            closest_ref_points_and_distances[index_pop]["ref_points"].extend(self._ref_points[i]
+                                                                             for i in range(len(distances))
+                                                                             if distances[i] == min_dist)
 
             index_pop += 1
 
         return closest_ref_points_and_distances
 
-    def _niching(self, amount_to_choose, closest_ref_points_and_distances, pop_last_front):
+    def _niching(self, amount_to_choose: int, closest_ref_points_and_distances, pop_last_front: np.ndarray):
 
         k = 1
-        indices_last_pareto_front = set(range(len(pop_last_front)))
+        indices_last_front = set(range(len(pop_last_front)))
 
-        add_pop = []
+        indices_to_add = []
 
-        type_info = numpy.iinfo(self._niche_counts.dtype)
+        type_info = np.iinfo(self._niche_counts.dtype)
 
         diff_len = len(closest_ref_points_and_distances) - len(pop_last_front) 
 
         while k <= amount_to_choose:
             min_niche_count = self._niche_counts.min()
 
-            indices_min = tuple(index for index in range(len(self._niche_counts)) if min_niche_count == self._niche_counts[index])
+            indices_min = (self._niche_counts == min_niche_count).nonzero()[0]
 
             random_index = random.choice(indices_min)
 
-            indices_pop_closest_to_ref_point = [diff_len + index for index in indices_last_pareto_front
-                                                 if self._ref_points[random_index] in closest_ref_points_and_distances[diff_len + index]["ref_points"]]
+            indices_pop_closest_to_ref_point = [diff_len + index for index in indices_last_front
+                                                if self._ref_points[random_index] in
+                                                closest_ref_points_and_distances[diff_len + index]["ref_points"]]
 
             if indices_pop_closest_to_ref_point:
-                index_for_del = 0
                 if self._niche_counts[random_index] == 0:
-                    index_min = min(indices_pop_closest_to_ref_point, key = lambda index: closest_ref_points_and_distances[index]["distance"])
+                    index_min = min(indices_pop_closest_to_ref_point, key=lambda index: closest_ref_points_and_distances[index]["distance"])
                     index_for_del = index_min - diff_len 
-                    add_pop.append(pop_last_front[index_for_del])
+                    indices_to_add.append(index_for_del)
                 else:
                     index_for_del = random.choice(indices_pop_closest_to_ref_point) - diff_len 
-                    add_pop.append(pop_last_front[index_for_del])
+                    indices_to_add.append(index_for_del)
 
                 self._niche_counts[random_index] += 1
-                indices_last_pareto_front.remove(index_for_del)
+                indices_last_front.remove(index_for_del)
                 k += 1
             else:
                 # Delete a reference point.
                 self._niche_counts[random_index] = type_info.max
-        return add_pop
+        return indices_to_add
 
-    def _cross_mutate_and_eval(self, parents, children, objectives, params):
+    def _cross_mutate_and_eval(self, problem, params):
 
-        amount_obj = len(objectives)
+        amount_obj = problem.amount_objs
 
         lower_bounds = params["lower_bounds"]
         upper_bounds = params["upper_bounds"]
-   
-        j = 0
-        for i in range(len(parents)):
-            index_parent1 = random.randint(0, len(parents) - 1)
-            index_parent2 = random.randint(0, len(parents) - 1)
 
-            parent1 = tuple(parents[index_parent1].point)
-            parent2 = tuple(parents[index_parent2].point)
+        new_children = self._crossover_op.cross(self.__points, **params)
 
-            temp_children = self._crossover.cross(parent1, parent2, **params)
+        if self.__children_points is None:
+            self.__children_points = np.zeros((len(new_children), len(lower_bounds)))
+        else:
+            self.__children_points.resize((len(new_children), len(lower_bounds)))
 
-            assert temp_children, "The crossover operator must return at least one child."
-            
-            for child in temp_children:
-                assert len(child) == len(parent1), "The length of the child must be same as the length of the parent."
+        if self.__children_fitness is None:
+            self.__children_fitness = np.zeros((len(new_children), amount_obj))
+        else:
+            self.__children_fitness.resize((len(new_children), amount_obj))
 
-            if j + len(temp_children) <= len(children):
-                for (index_child, child) in enumerate(temp_children):
-                    for (index_val, value) in zip(range(len(child)), child):
-                        children[j + index_child].point[index_val] = value
-            else:
-                children.extend(_Individual(numpy.array(child, dtype = float), numpy.zeros((amount_obj,))) for child in temp_children)
+        if self.__children_normalized_fitness is None:
+            self.__children_normalized_fitness = np.zeros((len(new_children), amount_obj))
+        else:
+            self.__children_normalized_fitness.resize((len(new_children), amount_obj))
 
-            j += len(temp_children)
+        for (i, child) in enumerate(new_children):
+            for (j, child_val) in enumerate(child):
+                self.__children_points[i, j] = child_val
 
-        if len(children) > j:
-            del children[j:]
+            indices_less_bounds = self.__children_points[i] < lower_bounds
+            indices_greater_bounds = self.__children_points[i] > upper_bounds
+            for index in (indices_less_bounds | indices_greater_bounds).nonzero()[0]:
+                self.__children_points[i, index] = clip_random(self.__children_points[i, index], lower_bounds[index], upper_bounds[index])
 
-        for child in children:
-            for (i, low_b, upp_b) in  zip(range(len(child.point)), lower_bounds, upper_bounds):
-                child.point[i] = st.clip_random(child.point[i], low_b, upp_b)
+            is_mutaded = self._mut_op.mutate(self.__children_points[i], **params)
 
-            mut_child = self._mut.mutate(tuple(child.point), **params)
+            if is_mutaded is True:
+                indices_less_bounds = self.__children_points[i] < lower_bounds
+                indices_greater_bounds = self.__children_points[i] > upper_bounds
+                for index in (indices_less_bounds | indices_greater_bounds).nonzero()[0]:
+                    self.__children_points[i, index] = clip_random(self.__children_points[i, index], lower_bounds[index], upper_bounds[index])
 
-            assert len(mut_child) == len(child.point), "The length of the mutated child must be same as it was."
+            for (j, val) in enumerate(problem.eval(self.__children_points[i])):
+                self.__children_fitness[i, j] = val
 
-            for (i, low_b, upp_b) in zip(range(len(child.point)), lower_bounds, upper_bounds):
-                child.point[i] = st.clip_random(mut_child[i], low_b, upp_b)
+        np.copyto(self.__normalized_fitnesses, self.__children_fitness)
 
-            child.eval(objectives)
+    def _normalize(self, fitnesses: np.ndarray, normalized_fitnesses: np.ndarray, amount_obj: int):
+        normalized_fitnesses -= self._ideal_point
 
-    def _normalize(self, population, amount_to_choose, amount_obj):
+        extreme_points = self._find_extreme_points(normalized_fitnesses, amount_obj)
 
-        for ind in population:
-            ind.translate_obj(self._ideal_point)
+        intercepts = self._find_intercepts(fitnesses, extreme_points)
 
-        extreme_points = self._find_extreme_points(population, amount_obj)
+        indices_with_close_values = np.isclose(self._ideal_point, intercepts, rtol=_REL_TOL, atol=_EPS)
+        diff = (intercepts - self._ideal_point)[~indices_with_close_values]
 
-        intercepts = self._find_intercepts(population, extreme_points)
+        normalized_fitnesses[:, indices_with_close_values] /= _EPS
+        normalized_fitnesses[:, ~indices_with_close_values] /= diff
 
-        for ind in population:
-            ind.normalize_obj(self._ideal_point, intercepts)
-
-        if self._prev_params["divisions"] is None:
+        if self.__prev_params["divisions"] is None:
             for ref_point in self._ref_points:
                 ref_point.map_on_hyperplane(self._ideal_point, intercepts)
 
@@ -599,23 +470,25 @@ class NSGA3:
         amount_obj = len(self._ref_points[0].fitness)
 
         if self._ideal_point is None:
-            self._ideal_point = numpy.zeros((amount_obj,))
+            self._ideal_point = np.zeros(amount_obj)
         else:
-            if len(self._ideal_point) != amount_obj:
-                self._ideal_point = numpy.zeros((amount_obj,))
+            self._ideal_point.resize(amount_obj)
 
         if self._niche_counts is None:
-            self._niche_counts = numpy.zeros((len(self._ref_points),), dtype = int)
+            self._niche_counts = np.zeros(len(self._ref_points), dtype=int)
         else:
-            if len(self._niche_counts) != len(self._ref_points):
-                self._niche_counts = numpy.zeros((len(self._ref_points),), dtype = int)
+            self._niche_counts.resize(len(self._ref_points))
 
-    def minimize(self, num_pop : int, bounds : Sequence[Sequence[Number]], objectives : Sequence[Callable[[Sequence[Number]], Number]]
-                 ,size_pop : Union[int, str] = 'auto' , ref_points : Union[int, str, Tuple[Number]] = 'auto', supplied_asp_points : Iterable[Sequence[Number]] = None):
+    def minimize(self, num_pop: int, problem: Type[bproblem.MOProblem], size_pop: Union[int, str] = 'auto'
+                 , ref_points: Union[int, str, Tuple[int]] = 'auto', supplied_asp_points: Iterable[Sequence[Any]] = None):
 
-        self._check_params(num_pop, objectives, bounds, size_pop, ref_points, supplied_asp_points)
+        lower_bounds = np.array(problem.lower_bounds, dtype=float)
+        upper_bounds = np.array(problem.upper_bounds, dtype=float)
 
-        amount_obj = len(objectives)
+        self._check_params(num_pop, problem.amount_objs, lower_bounds, upper_bounds
+                           , size_pop, ref_points, supplied_asp_points)
+
+        amount_obj = problem.amount_objs
 
         divisions = self._find_divisions(amount_obj, ref_points, supplied_asp_points)
 
@@ -625,65 +498,77 @@ class NSGA3:
 
         new_size_pop = self._find_pop_size(size_pop)
 
-        self._generate_init_pop(new_size_pop, bounds, amount_obj)
+        self._generate_init_pop(new_size_pop, len(lower_bounds), amount_obj)
 
-        lower_bounds = tuple(lower_b for (lower_b, upper_b) in bounds)
-        upper_bounds = tuple(upper_b for (lower_b, upper_b) in bounds)
+        params = {"iter": 1, "lower_bounds": lower_bounds, "upper_bounds": upper_bounds}
 
-        children = []
+        for i, point in enumerate(self.__points):
+            for j, val in enumerate(problem.eval(point)):
+                self.__fitnesses[i, j] = val
 
-        params = {"iter" : 1, "lower_bounds" : lower_bounds, "upper_bounds" : upper_bounds }
-
-        for ind in self._population:
-            ind.eval(objectives)
+        np.copyto(self.__normalized_fitnesses, self.__fitnesses)
 
         for num_iter in range(num_pop):
-
             params["iter"] = num_iter
 
             if num_iter % 10 == 0:
                 print("Iteration: ", num_iter)
 
-            self._cross_mutate_and_eval(self._population, children, objectives, params)
+            self._cross_mutate_and_eval(problem, params)
 
-            fronts = ndomsort.non_domin_sort(self._population + children, lambda x : x.fitness)
+            new_pop_points = scipy.vstack((self.__points, self.__children_points))
+            new_pop_fitnesses = scipy.vstack((self.__fitnesses, self.__children_fitness))
 
-            ndomsort_size_pop = 0
+            front_indices = np.array(ndomsort.non_domin_sort(new_pop_fitnesses, only_front_indices=True))
+            fronts, counts = np.unique(front_indices, return_counts=True)
 
-            last_index_pareto_front = 0
+            fronts = dict(zip(fronts, counts))
 
-            while ndomsort_size_pop <= new_size_pop:
-                ndomsort_size_pop += len(fronts[last_index_pareto_front])
-                last_index_pareto_front += 1
+            size_selected_pop = 0
+            # First front index.
+            last_front_index = front_indices.min()
 
-            last_index_pareto_front -= 1
+            while size_selected_pop <= new_size_pop:
+                size_selected_pop += fronts[last_front_index]
+                last_front_index += 1
 
-            if ndomsort_size_pop == new_size_pop:
-                index_pop = 0
-                for i in range(last_index_pareto_front + 1):
-                    for ind in fronts[i]:
-                        self._population[index_pop].copy_from_ind(ind)
-                        index_pop += 1
-            else:             
-                pop_exclude_last_front = tuple()
+            last_front_index -= 1
 
-                for i in range(last_index_pareto_front):
-                    pop_exclude_last_front += fronts[i]
+            if size_selected_pop == new_size_pop:
+                selected_indices = front_indices <= last_front_index
+                np.copyto(self.__points_copy, new_pop_points[selected_indices])
+                np.copyto(self.__fitnesses_copy, new_pop_fitnesses[selected_indices])
+            else:
+                indices_exclude_last_front = front_indices < last_front_index
+                indices_last_front = front_indices == last_front_index
 
-                last_pareto_front = fronts[last_index_pareto_front]
+                amount_to_choose = new_size_pop - size_selected_pop
 
-                amount_to_choose = len(self._population) - len(pop_exclude_last_front)
+                new_pop_normalized_fitnesses = scipy.vstack((self.__normalized_fitnesses, self.__children_normalized_fitness))
 
                 # Ideal point must be in the first Pareto front.
-                self._find_ideal_point(fronts[0])
+                self._find_ideal_point(new_pop_fitnesses[front_indices == front_indices.min()])
 
-                self._normalize(itertools.chain(pop_exclude_last_front, last_pareto_front), amount_to_choose, amount_obj)
+                self._normalize(new_pop_fitnesses, new_pop_normalized_fitnesses, amount_obj)
 
-                closest_ref_points_and_distances = self._associate_and_niche_counting(pop_exclude_last_front, last_pareto_front)
+                closest_ref_points_and_distances =\
+                    self._associate_and_niche_counting(new_pop_normalized_fitnesses[indices_exclude_last_front]
+                                                       , new_pop_normalized_fitnesses[indices_last_front])
 
-                pop_to_include = self._niching(amount_to_choose, closest_ref_points_and_distances, last_pareto_front)
+                indices_to_add = self._niching(amount_to_choose, closest_ref_points_and_distances
+                                               , new_pop_normalized_fitnesses[indices_last_front])
 
-                for (i, ind) in enumerate(itertools.chain(pop_exclude_last_front, pop_to_include)):
-                    self._population[i].copy_from_ind(ind)
+                for (i, (point, fitness)) in enumerate(
+                        zip(itertools.chain(new_pop_points[indices_exclude_last_front]
+                                            , new_pop_points[indices_last_front][indices_to_add])
+                            , itertools.chain(new_pop_fitnesses[indices_exclude_last_front]
+                                              , new_pop_fitnesses[indices_last_front][indices_to_add]))):
 
-        return tuple((tuple(ind.point), tuple(ind.fitness)) for ind in self._population)        
+                    self.__points_copy[i] = point
+                    self.__fitnesses_copy[i] = fitness
+
+            np.copyto(self.__points, self.__points_copy)
+            np.copyto(self.__fitnesses, self.__fitnesses_copy)
+            np.copyto(self.__normalized_fitnesses, self.__fitnesses)
+
+        return self.__points.copy(), self.__fitnesses.copy()

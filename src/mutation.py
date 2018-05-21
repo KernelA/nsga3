@@ -9,7 +9,7 @@ __all__ = ["MutationOp", "PolynomialMutationBound"]
 
 class MutationOp(ABC):
     @abstractmethod
-    def mutate(self, individual: np.ndarray, **kwargs):
+    def mutate(self, individual: np.ndarray, **kwargs) -> bool:
         pass
 
 
@@ -21,12 +21,14 @@ class PolynomialMutationBound(MutationOp):
         self._prob_mut = prob_mut
         self._dist_index = dist_index
 
-    def mutate(self, individual: np.ndarray, **kwargs) -> None:
+    def mutate(self, individual: np.ndarray, **kwargs) -> bool:
         lower_bounds = kwargs["lower_bounds"]
         upper_bounds = kwargs["upper_bounds"]
+        is_mutaded = False
 
         for i in range(len(individual)):
             if random.uniform(0, 1) < self._prob_mut:
+                is_mutaded = True
                 x = individual[i]
                 delta1 = (x - lower_bounds[i]) / (upper_bounds[i] - lower_bounds[i])
                 delta2 = (upper_bounds[i] - x) / (upper_bounds[i] - lower_bounds[i])
@@ -45,5 +47,5 @@ class PolynomialMutationBound(MutationOp):
                     delta_q = 1 - math.pow(val, 1 / mut_pow)
 
                 individual[i] += delta_q * (upper_bounds[i] - lower_bounds[i])
-
+        return is_mutaded
 
