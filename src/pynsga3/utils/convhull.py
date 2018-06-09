@@ -1,11 +1,10 @@
-"""The module contains additional functions for 'nsga3'.
+"""The module contains additional functions for 'pynsga3'.
 
 """
 
-from typing import Sequence, Iterable, Optional, Any, Tuple, List
-import random
+from typing import Tuple, List
 
-__all__ = ["generate_coeff_convex_hull",]
+__all__ = ["generate_coeff_convex_hull"]
 
 
 def _generate_coeff_convex_hull_recursive(amount_in_lin_comb: int, count_unique_values: int, level: int = 1,

@@ -1,19 +1,14 @@
 import random
 import math
-from abc import ABC, abstractmethod
+
+from . import bmut
 
 import numpy as np
 
-__all__ = ["MutationOp", "PolynomialMutationBound"]
+__all__ = ["PolynomialMutationBound"]
 
 
-class MutationOp(ABC):
-    @abstractmethod
-    def mutate(self, individual: np.ndarray, **kwargs) -> bool:
-        pass
-
-
-class PolynomialMutationBound(MutationOp):
+class PolynomialMutationBound(bmut.MutationOp):
 
     def __init__(self, prob_mut: float, dist_index: float):
         assert 0 <= prob_mut and prob_mut <= 1, "'prob_mut' must be in [0;1]."
@@ -24,11 +19,11 @@ class PolynomialMutationBound(MutationOp):
     def mutate(self, individual: np.ndarray, **kwargs) -> bool:
         lower_bounds = kwargs["lower_bounds"]
         upper_bounds = kwargs["upper_bounds"]
-        is_mutaded = False
+        is_mutated = False
 
         for i in range(len(individual)):
             if random.uniform(0, 1) < self._prob_mut:
-                is_mutaded = True
+                is_mutated = True
                 x = individual[i]
                 delta1 = (x - lower_bounds[i]) / (upper_bounds[i] - lower_bounds[i])
                 delta2 = (upper_bounds[i] - x) / (upper_bounds[i] - lower_bounds[i])
@@ -47,5 +42,4 @@ class PolynomialMutationBound(MutationOp):
                     delta_q = 1 - math.pow(val, 1 / mut_pow)
 
                 individual[i] += delta_q * (upper_bounds[i] - lower_bounds[i])
-        return is_mutaded
-
+        return is_mutated

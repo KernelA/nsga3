@@ -6,8 +6,8 @@ from abc import ABC, abstractmethod
 
 __all__ = ["MOProblem"]
 
-class MOProblem(ABC):
 
+class MOProblem(ABC):
     @property
     @abstractmethod
     def lower_bounds(self):

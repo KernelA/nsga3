@@ -1,22 +1,17 @@
-import random
 import math
+import random
 from typing import Sequence, List
-from abc import ABC, abstractmethod
 
 import numpy as np
-
-__all__ = ["CrossoverOp", "SBXBound"]
-
-
-class CrossoverOp(ABC):
-    @abstractmethod
-    def cross(self, parents: Sequence[np.ndarray], **kwargs):
-        pass
+from . import bcross
 
 
-class SBXBound(CrossoverOp):
+__all__ = ["SBXBound"]
+
+
+class SBXBound(bcross.CrossoverOp):
     def __init__(self, crossover_prob: float, distr_index: float):
-        assert crossover_prob >= 0 and crossover_prob <= 1, "'crossover_prob' must be in [0;1]."
+        assert crossover_prob >= 0 and crossover_prob <= 1, "'crossover_prob' must be in [0; 1]."
         assert distr_index >= 0, "'distr_index' must be >= 0"
         self._distr_index = distr_index
         self._cross_prob = crossover_prob
