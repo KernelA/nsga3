@@ -2,8 +2,7 @@ import unittest
 import random
 import math
 
-import convhull
-import nsga3
+from pynsga3 import utils
 
 
 def _binomial(n, k):
@@ -22,7 +21,7 @@ class TestStools(unittest.TestCase):
         low_b = -1
         upp_b = 1
 
-        self.assertEqual(value, nsga3.clip_random(value, low_b, upp_b))
+        self.assertEqual(value, utils.tools.clip_random(value, low_b, upp_b))
 
     def test_gen_convex_hull(self):
         dim = tuple(range(1,6))
@@ -30,7 +29,7 @@ class TestStools(unittest.TestCase):
 
         for d in dim:
             for c in count:
-                coefficients = convhull.generate_coeff_convex_hull(d, c)
+                coefficients = utils.tools.convhull.generate_coeff_convex_hull(d, c)
                 self.assertEqual(_binomial(d + c - 2, c - 1), len(coefficients))
                 for vec in coefficients:
                     self.assertAlmostEqual(1.0, sum(vec), places=10)
