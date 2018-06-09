@@ -7,7 +7,7 @@ import itertools
 import sys
 from typing import Tuple, Any, Union, Iterable, Sequence, Type
 
-from . import utils
+from .utils import convhull, tools
 from . import bproblem
 
 import numpy as np
@@ -122,7 +122,7 @@ class NSGA3:
       
             for i in range(len(divisions)):
                 coord_base_vector = (i + 1) * step
-                vecs_coeffs = utils.convhull.generate_coeff_convex_hull(amount_obj, divisions[i] + 1)
+                vecs_coeffs = convhull.generate_coeff_convex_hull(amount_obj, divisions[i] + 1)
       
                 self._ref_points += [_RefPoint(compute_point_on_hyperplane(coord_base_vector, vec_coeff, amount_obj)) 
                                       for vec_coeff in vecs_coeffs]
@@ -208,7 +208,7 @@ class NSGA3:
 
             # Here 'normalized_fitness' is the translated fitness.
             # The ideal point has been subtracting from the fitness at the moment.
-            min_normalized_fitness = min(normalized_fitnesses, key=lambda x: utils.tools.asf(x, weights))
+            min_normalized_fitness = min(normalized_fitnesses, key=lambda x: tools.asf(x, weights))
             extreme_points[num_obj] = min_normalized_fitness
       
         return extreme_points
@@ -350,7 +350,7 @@ class NSGA3:
         for i, child in enumerate(new_children):
             for j, child_val in enumerate(child):
                 if child_val < lower_bounds[j] or child_val > upper_bounds[j]:
-                    self.__children_points[i, j] = utils.tools.clip_random(child_val, lower_bounds[j], upper_bounds[j])
+                    self.__children_points[i, j] = tools.clip_random(child_val, lower_bounds[j], upper_bounds[j])
                 else:
                     self.__children_points[i, j] = child_val
 
@@ -360,7 +360,7 @@ class NSGA3:
                 indices_less_bounds = self.__children_points[i] < lower_bounds
                 indices_greater_bounds = self.__children_points[i] > upper_bounds
                 for index in (indices_less_bounds | indices_greater_bounds).nonzero()[0]:
-                    self.__children_points[i, index] = utils.tools.clip_random(self.__children_points[i, index]
+                    self.__children_points[i, index] = tools.clip_random(self.__children_points[i, index]
                                                                                , lower_bounds[index], upper_bounds[index])
 
             for j, val in enumerate(problem.eval(self.__children_points[i])):
