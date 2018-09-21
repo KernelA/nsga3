@@ -2,7 +2,6 @@
 
 """
 import random
-import math
 import itertools
 import sys
 from typing import Tuple, Any, Union, Iterable, Sequence, Type
@@ -13,8 +12,14 @@ from . import bproblem
 import numpy as np
 import scipy
 from scipy import linalg
-from nds import ndomsort
 
+import warnings
+
+try:
+    from nds import ndomsort
+except ImportError:
+    warnings.warn("You need to install nds package. You can download it from:\nhttps://github.com/KernelA/nds-py")
+    raise
 
 __all__ = ["NSGA3"]
 
@@ -24,6 +29,8 @@ _REL_TOL = sys.float_info.dig - 2 if sys.float_info.dig - 2 > 0 else sys.float_i
 
 
 class _RefPoint:
+    """The class represents a reference point.
+    """
 
     __slots__ = ["fitness", "fitness_on_hyperplane"]
 
@@ -32,6 +39,9 @@ class _RefPoint:
         self.fitness_on_hyperplane = fitness.copy()
 
     def map_on_hyperplane(self, ideal_point: np.ndarray, intercepts: np.ndarray) -> None:
+        """Maps a reference point on a hyperplane. The hyperplane defined as x_1 + .... + x_n = 1,
+        where n - dimension of objective space, x_i >= 0, i in {1,...,n}.
+        """
         np.copyto(self.fitness_on_hyperplane, self.fitness)
 
         self.fitness_on_hyperplane -= ideal_point
@@ -47,7 +57,21 @@ class _RefPoint:
 
 
 class NSGA3:
+    """The algorithm described in:
 
+    Deb, Kalyanmoy & Jain, Himanshu. (2014).
+    An Evolutionary Many-Objective Optimization Algorithm Using Reference-Point-Based Nondominated Sorting Approach,
+     Part I: Solving Problems With Box Constraints.
+    Evolutionary Computation, IEEE Transactions on. 18. 577-601. 10.1109/TEVC.2013.2281535.
+
+    """
+
+    # Division of axis when need to create reference points each axis divided on n parts.
+    # Keys are number of objectives.
+    # Values are p parameter in the original algorithm.
+    # For example, if two-objective problems chosen,
+    # then p = 4 and we will get C_{2 + 4 - 1}^4 = 5 reference points.
+    # If a value is a two number, then we use two-layered reference points.
     __divisions_axis = {
         2: (4,),
         3: (10,),
@@ -62,6 +86,13 @@ class NSGA3:
     }
 
     def __init__(self, crossover_op, mutation_operator):
+        """Create NSGA-3 algorithm.
+
+        --------------------
+        Args:
+            'crossover_op': A crossover operator. See class CrossoverOp.
+            'mutation_operator': A mutation operator. See class MutationOp.
+        """
         self._ref_points = []
         self.__points = None
         self.__fitnesses = None
@@ -83,58 +114,93 @@ class NSGA3:
 
         self._is_size_pop_str = False
         
-    def _generate_init_pop(self, size_pop: int, amount_obj: int, lower_bounds, upper_bounds):
+    def _generate_init_pop(self, size_pop: int, amount_obj: int, lower_bounds: np.ndarray, upper_bounds: np.ndarray):
+        """Generate an initial population uniformly on a hyperrectangle  area.
+        """
         dim_decision = len(lower_bounds)
-        if self.__points is None:
-            self.__points = np.zeros((size_pop, dim_decision))
-        else:
-            self.__points.resize((size_pop, dim_decision))
 
         if self.__fitnesses is None:
             self.__fitnesses = np.zeros((size_pop, amount_obj))
         else:
             self.__fitnesses.resize((size_pop, amount_obj))
+
         self.__prev_params["size_pop"] = size_pop
 
-        for i in range(len(self.__points)):
-            self.__points[i] = (upper_bounds - lower_bounds) * np.random.rand(dim_decision) + lower_bounds
+        self.__points = (upper_bounds - lower_bounds) * np.random.rand(size_pop, dim_decision) + lower_bounds
 
-    def _generate_reference_points(self, divisions, amount_obj, supplied_asp_points):
+    def _gen_ref_points(self, divisions: Tuple[int], amount_obj: int):
+        """Generate the reference points on the hyperplane.
+
+        The hyperplane defined as x_1 + .... + x_n = 1,
+        where n - dimension of objective space, x_i >= 0, i in {1,...,n}.
+
+        --------------------
+        Args:
+            'divisions':
+            'amount_obj':
+
+        """
+
+        def compute_point_on_hyperplane(coord_base_vector, vec_coeff, amount_obj: int) -> np.ndarray:
+            """
+
+            --------------------
+            Args:
+                'coord_base_vector': A coordinate of base vector in the convex hull.
+                                     For example, if 'coord_base_vector' = 0.25
+                                     then convex hull based on vectors:
+                                     (0.25, 0, ..., 0), (0, 0.25, ..., 0), ... ,(0, 0, ..., 0.25).
+                                     The number of vectors and its dimension is equal to 'amount_obj'.
+                'vec_coeff': A vector of coefficients of the convex hull.
+                'amount_obj': Dimension of objective space.
+
+            """
+            point_on_hyperplane = np.zeros(amount_obj)
+
+            for coord_ind in range(len(point_on_hyperplane)):
+                point_on_hyperplane[coord_ind] = coord_base_vector * vec_coeff[coord_ind]
+            return point_on_hyperplane
+
+        prev_divisions = self.__prev_params.get("divisions", None)
+
         is_gen_ref_point = True
 
-        if divisions is None:
-            self._ref_points = [_RefPoint(np.array(sap, dtype=float)) for sap in supplied_asp_points]
-            is_gen_ref_point = False
-        elif 'divisions' in self.__prev_params:
-            if self.__prev_params['divisions'] is not None:
-                if self.__prev_params['divisions'] == divisions:
-                    is_gen_ref_point = False
+        if prev_divisions is not None and self._ref_points is not None:
+            # The reference points are same as in the previous run.
+            if prev_divisions == divisions and len(self._ref_points[0].fitness) == amount_obj:
+                is_gen_ref_point = False
 
-        if is_gen_ref_point:  
+        if is_gen_ref_point:
             step = 1 / len(divisions)
-     
-            def compute_point_on_hyperplane(coord_base_vector, vec_coeff, amount_obj):
-                point_on_hyperplane = np.zeros(amount_obj)
-     
-                for index_array in range(len(point_on_hyperplane)):
-                    point_on_hyperplane[index_array] = coord_base_vector * vec_coeff[index_array]
-                return point_on_hyperplane
-      
+
             for i in range(len(divisions)):
                 coord_base_vector = (i + 1) * step
-                vecs_coeffs = convhull.generate_coeff_convex_hull(amount_obj, divisions[i] + 1)
-      
-                self._ref_points += [_RefPoint(compute_point_on_hyperplane(coord_base_vector, vec_coeff, amount_obj)) 
-                                      for vec_coeff in vecs_coeffs]
+                cvh_coeffs = convhull.generate_coeff_convex_hull(amount_obj, divisions[i] + 1)
 
-        self.__prev_params['divisions'] = divisions
+                self._ref_points += [_RefPoint(compute_point_on_hyperplane(coord_base_vector, vec_coeff, amount_obj))
+                                     for vec_coeff in cvh_coeffs]
+
+            # Update the previous parameter.
+            self.__prev_params["divisions"] = divisions
+
+    def _gen_ref_points_from_sap(self, supplied_asp_points: Iterable[Sequence[Any]]):
+        """Remember user-supplied reference points.
+
+        --------------------
+        Args:
+            'supplied_asp_points': User-supplied reference points (aspiration points).
+        """
+
+        self._ref_points = [_RefPoint(np.array(sap, dtype=float)) for sap in supplied_asp_points]
+        self.__prev_params['divisions'] = None
 
     def _check_params(self, num_pop: int, amount_objs: int, lower_bounds: np.ndarray, upper_bounds: np.ndarray,
                       size_pop: int, ref_points, supplied_asp_points):
-             
+
         assert amount_objs > 1, "The length of 'objectives' must be > 1."
         assert num_pop > 0, "'num_pop' must be > 0."
-        assert len(lower_bounds) > 0 and len(upper_bounds), "The length of 'lower_bounds' or 'upper_bounds' must be > 0."
+        assert len(lower_bounds) > 0, "The length of 'lower_bounds' must be > 0."
+        assert len(upper_bounds) > 0, "The length of 'upper_bounds' must be > 0."
         assert len(lower_bounds) == len(upper_bounds), "The 'lower_bounds' and 'upper_bound' have unequal length."
 
         indices = upper_bounds > lower_bounds
@@ -179,13 +245,15 @@ class NSGA3:
 
         if supplied_asp_points is not None:
             is_empty = True
-            for (i, sal) in enumerate(supplied_asp_points):
+            for i, sal in enumerate(supplied_asp_points):
                 is_empty = False
                 assert len(sal) == len(amount_objs), "The length of the supplied aspiration point at position {0}" \
                                                      " is not equals length 'objectives'.".format(i)
             assert not is_empty, "The supplied aspiration points are empty."
  
     def _find_pop_size(self, old_size_pop: int):
+        """Such rule is not really needed. We keep population size as described in the algorithm.
+        """
         new_size_pop = old_size_pop
 
         if self._is_size_pop_str:
@@ -198,7 +266,8 @@ class NSGA3:
     def _find_ideal_point(self, fitnesses: np.ndarray):
         fitnesses.min(axis=0, out=self._ideal_point)
 
-    def _find_extreme_points(self, normalized_fitnesses: np.ndarray, amount_obj: int):
+    @staticmethod
+    def _find_extreme_points(normalized_fitnesses: np.ndarray, amount_obj: int):
         weights = np.full(amount_obj, 1E-6)
         extreme_points = np.zeros((amount_obj, amount_obj))
 
@@ -213,10 +282,8 @@ class NSGA3:
       
         return extreme_points
 
-    def _find_divisions(self, amount_obj, ref_points, supplied_asp_points):
-        if supplied_asp_points is not None:
-            divisions = None
-        elif self._is_ref_points_str:
+    def _find_divisions(self, amount_obj, ref_points):
+        if self._is_ref_points_str:
             if amount_obj in NSGA3.__divisions_axis:
                 divisions = NSGA3.__divisions_axis[amount_obj]
             else:
@@ -228,40 +295,57 @@ class NSGA3:
 
         return divisions
 
-    def _find_intercepts(self, fitnesses: np.ndarray, extreme_points: np.ndarray):
-        unique_rows = np.unique(extreme_points, axis=0)
-        is_seq_has_duplicates = len(unique_rows) != len(extreme_points)
+    @staticmethod
+    def _find_intercepts(fitnesses: np.ndarray, extreme_points: np.ndarray):
+        is_linalg_error = False
 
-        if is_seq_has_duplicates:
-            solution = np.zeros(len(extreme_points))
-        else:
+        try:
             b = np.ones(len(extreme_points))
 
             solution = linalg.solve(extreme_points, b, overwrite_a=True, overwrite_b=True)
-         
+
             for i in range(len(solution)):
                 solution[i] = 1 / solution[i]
 
+        except linalg.LinAlgError:
+            is_linalg_error = True
+        except linalg.LinAlgWarning:
+            is_linalg_error = True
+
+        if is_linalg_error:
+            solution = np.zeros(len(extreme_points))
+
         # Find the maximum values for the all coordinates of fitness in the population.
-        if is_seq_has_duplicates or np.any(solution < 0):
+        if is_linalg_error or np.any(solution < 0):
             fitnesses.max(axis=0, out=solution)
 
         return solution
 
-    def _compute_distance(self, direction: np.ndarray, point: np.ndarray):
+    @staticmethod
+    def _compute_distance(direction: np.ndarray, point: np.ndarray):
+        """Compute distance between reference line and point.
+
+        The reference line is line which joining the reference point with the origin.
+
+        --------------------
+        Args:
+            'direction':
+            'point':
+
+        Returns:
+
+        """
         dot_prod = scipy.dot(direction, point)
         squared_norm = scipy.power(direction, 2).sum()
 
         coeff = dot_prod / squared_norm
-        res = 0
 
-        for i in range(len(direction)):
-            res += (point[i] - direction[i] * coeff) ** 2
-
-        return math.sqrt(res)
+        return linalg.norm(point - direction * coeff)
 
     def _associate_and_niche_counting(self, normalized_fitnesses_exclude_last_front: np.ndarray
                                       , normalized_fitnesses_last_front: np.ndarray):
+        """Assign to each fitness in population closest reference points.
+        """
 
         len_pop = len(normalized_fitnesses_exclude_last_front) + len(normalized_fitnesses_last_front)
 
@@ -269,35 +353,38 @@ class NSGA3:
 
         closest_ref_points_and_distances = {i: {"distance": 0, "indices_ref_points": set()} for i in range(len_pop)}
 
-        index_pop = 0
-
         distances = np.zeros(len(self._ref_points))
 
-        for ind in itertools.chain(normalized_fitnesses_exclude_last_front, normalized_fitnesses_last_front):
+        for index_pop, ind in enumerate(itertools.chain(normalized_fitnesses_exclude_last_front, normalized_fitnesses_last_front)):
             for index_rp, ref_point in enumerate(self._ref_points):
-                distances[index_rp] = self._compute_distance(ref_point.fitness_on_hyperplane, ind)
+                distances[index_rp] = NSGA3._compute_distance(ref_point.fitness_on_hyperplane, ind)
 
             min_dist = distances.min()
             closest_ref_points_and_distances[index_pop]["distance"] = min_dist
             indices = (distances == min_dist).nonzero()[0]
+
             for i in indices:
                 if index_pop < len(normalized_fitnesses_exclude_last_front):
                     self._niche_counts[i] += 1
                 closest_ref_points_and_distances[index_pop]["indices_ref_points"].add(i)
 
-            index_pop += 1
-
         return closest_ref_points_and_distances
 
-    def _niching(self, amount_to_choose: int, closest_ref_points_and_distances, pop_last_front: np.ndarray):
-
+    def _niching(self, amount_to_choose: int, closest_ref_points_and_distances: dict, pop_last_front: np.ndarray):
+        """Choose members from 'pop_last_front' in amount 'amount_to_choose'.
+        """
         k = 1
         indices_last_front = set(range(len(pop_last_front)))
 
         indices_to_add = []
 
+        indices_ref_points = np.array([True] * len(self._ref_points), dtype=np.bool_)
+
         type_info = np.iinfo(self._niche_counts.dtype)
 
+        # Each key of dictionary 'closest_ref_points_and_distances' is index of member of population.
+        # Keys include indices of 'pop_last_front'.
+        # So 0 index in 'pop_last_front' corresponds of diff_len + 0 key in 'closest_ref_points_and_distances'.
         diff_len = len(closest_ref_points_and_distances) - len(pop_last_front) 
 
         while k <= amount_to_choose:
@@ -315,21 +402,25 @@ class NSGA3:
                 if self._niche_counts[random_index] == 0:
                     index_min = min(indices_pop_closest_to_ref_point
                                     , key=lambda index: closest_ref_points_and_distances[index]["distance"])
-                    index_for_del = index_min - diff_len 
-                    indices_to_add.append(index_for_del)
+                    # Return to zero-based index because we choose from 'pop_last_front' in the end.
+                    index_for_add = index_min - diff_len
+                    indices_to_add.append(index_for_add)
                 else:
-                    index_for_del = random.choice(indices_pop_closest_to_ref_point) - diff_len 
-                    indices_to_add.append(index_for_del)
+                    index_for_add = random.choice(indices_pop_closest_to_ref_point) - diff_len
+                    indices_to_add.append(index_for_add)
 
                 self._niche_counts[random_index] += 1
-                indices_last_front.remove(index_for_del)
+                # Remove a member from further choosing.
+                indices_last_front.remove(index_for_add)
                 k += 1
             else:
                 # Delete a reference point.
                 self._niche_counts[random_index] = type_info.max
         return indices_to_add
 
-    def _cross_mutate_and_eval(self, problem, params):
+    def _cross_mutate_and_eval(self, problem: bproblem.MOProblem, params: dict):
+        """Apply crossover and mutation operator. Get values of objectives in a new population.
+        """
         amount_obj = problem.amount_objs
 
         lower_bounds = params["lower_bounds"]
@@ -349,16 +440,14 @@ class NSGA3:
 
         for i, child in enumerate(new_children):
             for j, child_val in enumerate(child):
-                if child_val < lower_bounds[j] or child_val > upper_bounds[j]:
-                    self.__children_points[i, j] = tools.clip_random(child_val, lower_bounds[j], upper_bounds[j])
-                else:
-                    self.__children_points[i, j] = child_val
+                self.__children_points[i, j] = tools.clip_random(child_val, lower_bounds[j], upper_bounds[j])
 
             is_mutaded = self._mut_op.mutate(self.__children_points[i], **params)
 
             if is_mutaded:
                 indices_less_bounds = self.__children_points[i] < lower_bounds
                 indices_greater_bounds = self.__children_points[i] > upper_bounds
+
                 for index in (indices_less_bounds | indices_greater_bounds).nonzero()[0]:
                     self.__children_points[i, index] = tools.clip_random(self.__children_points[i, index]
                                                                                , lower_bounds[index], upper_bounds[index])
@@ -369,9 +458,9 @@ class NSGA3:
     def _normalize(self, fitnesses: np.ndarray, normalized_fitnesses: np.ndarray, amount_obj: int):
         normalized_fitnesses -= self._ideal_point
 
-        extreme_points = self._find_extreme_points(normalized_fitnesses, amount_obj)
+        extreme_points = NSGA3._find_extreme_points(normalized_fitnesses, amount_obj)
 
-        intercepts = self._find_intercepts(fitnesses, extreme_points)
+        intercepts = NSGA3._find_intercepts(fitnesses, extreme_points)
 
         indices_with_close_values = np.isclose(self._ideal_point, intercepts, rtol=_REL_TOL, atol=_EPS)
         diff = (intercepts - self._ideal_point)[~indices_with_close_values]
@@ -379,6 +468,7 @@ class NSGA3:
         normalized_fitnesses[:, indices_with_close_values] /= _EPS
         normalized_fitnesses[:, ~indices_with_close_values] /= diff
 
+        # Users-defined reference points. It must be mapped on hyperplane.
         if self.__prev_params["divisions"] is None:
             for ref_point in self._ref_points:
                 ref_point.map_on_hyperplane(self._ideal_point, intercepts)
@@ -395,6 +485,8 @@ class NSGA3:
             self._niche_counts.resize(len(self._ref_points))
 
     def _init_all_pop(self):
+        """Joining two ndarrays to one ndarray (decisions, fitnesses and normalized fitnesses).
+        """
         if self.__all_pop_points is None:
             self.__all_pop_points = scipy.vstack((self.__points, self.__children_points))
         else:
@@ -418,19 +510,43 @@ class NSGA3:
             np.copyto(self.__all_pop_normalized_fitnesses, self.__all_pop_fitnesses)
 
     def minimize(self, num_pop: int, problem: Type[bproblem.MOProblem], size_pop: Union[int, str] = 'auto'
-                 , ref_points: Union[int, str, Tuple[int]] = 'auto', supplied_asp_points: Iterable[Sequence[Any]] = None):
+                 , num_ref_points: Union[int, str, Tuple[int]] = 'auto'
+                 , supplied_asp_points: Iterable[Sequence[Any]] = None) -> Tuple[np.ndarray]:
+        """Run NSGA-3 algorithm.
+
+        --------------------
+        Args:
+            num_pop: A total number of populations which replace one another (it is a number of iterations).
+            problem: A multiobjective optimization problem. Its must be subclass of bproblem.MOProblem.
+            size_pop: A number of decisions which generating on each iteration.
+                      If 'size_pop' is equal to 'auto' then it is the smallest multiple of four
+                      and greater than a total number of reference points.
+            num_ref_points: The parameter used for calculation of a total number of reference points.
+                            It is a number of division of axis on parts in objective space.
+                            If it is int then is a number of division of axis on parts in objective space.
+                            If it is 'auto'. A number of division of axis is stored in dictionary __divisions_axis.
+                            If it is tuple. Two-layered or more reference points will be used.
+                            If 'supplied_asp_points' is not None then the parameter is not used.
+            supplied_asp_points: User-defined reference points.
+
+        --------------------
+        Returns:
+            Tuple. The first item is decisions. The second item is fitnesses.
+        """
 
         lower_bounds = np.array(problem.lower_bounds, dtype=float)
         upper_bounds = np.array(problem.upper_bounds, dtype=float)
 
         self._check_params(num_pop, problem.amount_objs, lower_bounds, upper_bounds
-                           , size_pop, ref_points, supplied_asp_points)
+                           , size_pop, num_ref_points, supplied_asp_points)
 
         amount_obj = problem.amount_objs
 
-        divisions = self._find_divisions(amount_obj, ref_points, supplied_asp_points)
-
-        self._generate_reference_points(divisions, amount_obj, supplied_asp_points)
+        if supplied_asp_points is None:
+            divisions = self._find_divisions(amount_obj, num_ref_points)
+            self._gen_ref_points(divisions, amount_obj)
+        else:
+            self._gen_ref_points_from_sap(supplied_asp_points)
 
         self._init_vectors(amount_obj)
 
@@ -481,7 +597,7 @@ class NSGA3:
                 indices_last_front = front_indices == last_front_index
 
                 # Ideal point must be in the first Pareto front.
-                self._find_ideal_point(self.__all_pop_fitnesses[front_indices == fronts[0]])
+                self.__all_pop_fitnesses[front_indices == fronts[0]].min(axis=0, out=self._ideal_point)
 
                 self._normalize(self.__all_pop_fitnesses, self.__all_pop_normalized_fitnesses, amount_obj)
 

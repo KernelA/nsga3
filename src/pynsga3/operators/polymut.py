@@ -1,3 +1,6 @@
+"""The module contains bounded polynomial mutation operator.
+
+"""
 import random
 import math
 
@@ -9,14 +12,45 @@ __all__ = ["PolynomialMutationBound"]
 
 
 class PolynomialMutationBound(bmut.MutationOp):
+    """The bounded polynomial mutation operator.
+
+    The operator described:
+        Deb, Kalyanmoy & Goyal, Mayank. (1999).
+        A Combined Genetic Adaptive Search (GeneAS) for Engineering Design.
+        Computer Science and Informatics. 26.
+
+    The algorithm of the bounded operator was taken from:
+        http://www.iitk.ac.in/kangal/codes.shtml (Multi-objective NSGA-II code in C)
+    """
 
     def __init__(self, prob_mut: float, dist_index: float):
-        assert 0 <= prob_mut and prob_mut <= 1, "'prob_mut' must be in [0;1]."
+        """Create bounded polynomial mutation operator.
+
+        --------------------
+        Args:
+            prob_mut: The probability of mutation of real value.
+            dist_index: The distribution index.
+        """
+        assert 0 <= prob_mut <= 1, "'prob_mut' must be in [0; ]."
         assert dist_index >= 0, "'dist_index' must be >= 0."
         self._prob_mut = prob_mut
         self._dist_index = dist_index
 
     def mutate(self, individual: np.ndarray, **kwargs) -> bool:
+        """Mutate 'individual'.
+
+        --------------------
+        Args:
+            individual:
+            kwargs: Additional arguments.
+                       {"lower_bounds" (np.array): the lower bounds of decision space,
+                        "upper_bounds" (np.array): the upper bounds of decision space}
+
+        --------------------
+        Returns:
+            True if 'individual' was mutated otherwise False.
+
+        """
         lower_bounds = kwargs["lower_bounds"]
         upper_bounds = kwargs["upper_bounds"]
         is_mutated = False

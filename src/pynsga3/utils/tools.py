@@ -10,9 +10,9 @@ def clip_random(number: float, low_b: float, upp_b: float) -> float:
 
     --------------------
     Args:
-         'number': The number for the clipping.
-         'low_b': The lower bound.
-         'upp_b': The upper bound.
+         number: The number for the clipping.
+         low_b: The lower bound.
+         upp_b: The upper bound.
 
     --------------------
     Returns:
@@ -24,4 +24,6 @@ def clip_random(number: float, low_b: float, upp_b: float) -> float:
 
 
 def asf(fitness: np.ndarray, weights: np.ndarray) -> float:
+    """Achievement scalarizing function. See NSGA-3 algorithm.
+    """
     return (fitness / weights).max()
