@@ -22,7 +22,7 @@ class TestNSGA3(unittest.TestCase):
         dtlz1 = dtlzproblems.DTLZ1(3)
         for i in range(10):
             print("Run ", i)
-            points, fitnesses = self.opt.minimize(400, dtlz1, ref_points=12)
+            points, fitnesses = self.opt.minimize(400, dtlz1, num_ref_points=12)
             res = pandas.DataFrame(scipy.hstack((points, fitnesses)), columns=["x" + str(i) for i in range(1, points.shape[1] + 1)] +
                                    ["obj" + str(i) for i in range(1, fitnesses.shape[1] + 1)])
             res.to_csv(os.path.join(self.path, f"Solution_DTLZ1(3)_id_0_run_{i}.csv"), index=False)
