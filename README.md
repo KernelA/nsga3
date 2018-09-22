@@ -16,4 +16,4 @@ Deb, Kalyanmoy & Jain, Himanshu. (2014). An Evolutionary Many-Objective Optimiza
 
 ## How to use
 
-See [example](./example/example.ipynb)
+See [example](./example/Example.ipynb)
