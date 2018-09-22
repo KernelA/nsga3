@@ -165,7 +165,7 @@ class NSGA3:
 
         is_gen_ref_point = True
 
-        if prev_divisions is not None and self._ref_points is not None:
+        if prev_divisions is not None:
             # The reference points are same as in the previous run.
             if prev_divisions == divisions and len(self._ref_points[0].fitness) == amount_obj:
                 is_gen_ref_point = False
@@ -378,13 +378,12 @@ class NSGA3:
 
         indices_to_add = []
 
-        indices_ref_points = np.array([True] * len(self._ref_points), dtype=np.bool_)
-
         type_info = np.iinfo(self._niche_counts.dtype)
 
         # Each key of dictionary 'closest_ref_points_and_distances' is index of member of population.
         # Keys include indices of 'pop_last_front'.
-        # So 0 index in 'pop_last_front' corresponds of diff_len + 0 key in 'closest_ref_points_and_distances'.
+        # So member with 0 index in 'pop_last_front'
+        # corresponds to member with diff_len + 0 key in 'closest_ref_points_and_distances'.
         diff_len = len(closest_ref_points_and_distances) - len(pop_last_front) 
 
         while k <= amount_to_choose:
@@ -468,7 +467,7 @@ class NSGA3:
         normalized_fitnesses[:, indices_with_close_values] /= _EPS
         normalized_fitnesses[:, ~indices_with_close_values] /= diff
 
-        # Users-defined reference points. It must be mapped on hyperplane.
+        # User-defined reference points. It must be mapped on hyperplane.
         if self.__prev_params["divisions"] is None:
             for ref_point in self._ref_points:
                 ref_point.map_on_hyperplane(self._ideal_point, intercepts)
