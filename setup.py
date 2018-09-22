@@ -20,7 +20,7 @@ setup(
     url="https://github.com/KernelA/nsga3",
     python_requires=">=3.5",
     classifiers=[
-        "Development Status :: 4 - Beta"
+        "Development Status :: 2 - Pre-Alpha"
     ]
 )
 
