@@ -104,3 +104,6 @@ ENV/
 .vs
 *.pyproj
 *.sln
+
+
+.idea
