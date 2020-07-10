@@ -1,5 +1,9 @@
 # NSGA-3 pre-alpha version
 
+**This repository no longer supported.**
+
+You can find faster [C++ implementation here](https://www.researchgate.net/publication/262913060_nsga3cpp10_A_C_Implementation_of_NSGA-III)
+
 ## Description of the method
 
 You can read about the method in the next article:
